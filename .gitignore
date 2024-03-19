@@ -1,0 +1,47 @@
+# CMake generated files and build directories
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+build/
+
+# Executable and libraries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Object and archive files
+*.o
+*.a
+*.obj
+*.lib
+
+# CUDA compilation artifacts
+*.ptx
+*.cubin
+*.fatbin
+*.fatbin.c
+
+# MPI compilation artifacts
+*.mpicc.txt
+*.mpicxx.txt
+
+# Editor backups and temporary files
+*~
+*.swp
+*.tmp
+*.bak
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Exclude specific directories that may contain user-specific or sensitive info
+# Add any additional directories or files specific to your project that should not be tracked
+# For instance, configuration files, external libraries, etc.
