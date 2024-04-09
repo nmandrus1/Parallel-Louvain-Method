@@ -1,47 +1,60 @@
-# CMake generated files and build directories
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
-build/
+# helix ignore file
+.ignore
 
-# Executable and libraries
-*.exe
-*.dll
+# Compiled Object files
+**/.DS_Store
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
 *.so
 *.dylib
+*.dll
 
-# Object and archive files
-*.o
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
 *.a
-*.obj
 *.lib
 
-# CUDA compilation artifacts
-*.ptx
-*.cubin
-*.fatbin
-*.fatbin.c
+# Executables
+*.exe
+*.out
+*.app
 
-# MPI compilation artifacts
-*.mpicc.txt
-*.mpicxx.txt
+**/cmake-build-debug
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/install_manifest.txt
+**/CMakeFiles/
+**/CTestTestfile.cmake
+**/Makefile
+**/*.cbp
+**/CMakeScripts
+**/compile_commands.json
 
-# Editor backups and temporary files
-*~
-*.swp
-*.tmp
-*.bak
+include/divisible/*
 
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
 
-# Exclude specific directories that may contain user-specific or sensitive info
-# Add any additional directories or files specific to your project that should not be tracked
-# For instance, configuration files, external libraries, etc.
+## Local 
+
+.idea/*.xml
+
+build/**/*
+
+include/*
+lib/*
+bin/*
+test/test_runner
+
+_deps

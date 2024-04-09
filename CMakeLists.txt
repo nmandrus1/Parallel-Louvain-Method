@@ -1,38 +1,25 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
+project(Graph500 LANGUAGES CXX CUDA)
 
-project(MyMPICUDAProject LANGUAGES CXX CUDA)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF) 
 
-# Find the MPI package
+set(CMAKE_BUILD_TYPE Debug)
+
 find_package(MPI REQUIRED)
 
-# Ensure that the CUDA toolkit is available
-find_package(CUDA REQUIRED)
+enable_testing()
 
-# Add the include directories for MPI and CUDA
-include_directories(${MPI_INCLUDE_PATH})
-include_directories(${CUDA_INCLUDE_DIRS})
+include(FetchContent)
 
-# Specify the C++ standard
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
+cmake_policy(SET CMP0135 NEW)
+FetchContent_Declare(
+  googletest
+  URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+)
 
-# Add the source files and headers
-include_directories(include)
-file(GLOB SOURCES "src/*.cpp" "src/*.cu")
+FetchContent_MakeAvailable(googletest)
 
-# Define the executable to be built from the specified sources
-add_executable(MyMPICUDAExec ${SOURCES})
-
-# Link the MPI and CUDA libraries
-target_link_libraries(MyMPICUDAExec ${MPI_LIBRARIES} ${CUDA_LIBRARIES})
-
-# If using an MPI compiler, specify the compiler to CMake
-if(MPI_COMPILE_FLAGS)
-  set_target_properties(MyMPICUDAExec PROPERTIES
-    COMPILE_FLAGS "${MPI_COMPILE_FLAGS}")
-endif()
-
-if(MPI_LINK_FLAGS)
-  set_target_properties(MyMPICUDAExec PROPERTIES
-    LINK_FLAGS "${MPI_LINK_FLAGS}")
-endif()
+add_subdirectory(src)
+add_subdirectory(tests)
