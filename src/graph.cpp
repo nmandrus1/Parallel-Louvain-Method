@@ -58,7 +58,8 @@ std::vector<size_t> Graph::bfs(const size_t src) const {
     // get list of adjacent vertices
     auto connections = this->get_edges(parent);
     for (size_t v : connections) {
-      if (!visited.contains(v)) {
+      // check if v is in visited
+      if (visited.find(v) != visited.end()) {
         parents[v] = parent;
         q.push(v);
         visited.insert(v);
