@@ -20,6 +20,7 @@ class Graph {
 
   // generate a graph using kronecker algorithm
   static Graph from_kronecker(int scale, int edgefactor, unsigned long seed);
+  static Graph from_kronecker_cuda(int scale, int edgefactor, unsigned long seed);
 
   // add an edge between two vertices
   void add_edge(const int v1, const int v2);
@@ -46,7 +47,6 @@ class Graph {
 
   // print adj. mat. 
   void print_graph() const;
-  void hello_cuda();
   
   private:
   // Bitfield Adjacency Matrix
@@ -63,6 +63,7 @@ class Graph {
 
 
 std::vector<std::vector<int>> generate_kronecker_list(int scale, int edgefactor, unsigned long seed);
+std::vector<std::vector<int>> generate_kronecker_list_cuda(int scale, int edgefactor, unsigned long long seed);
 
 #endif
 

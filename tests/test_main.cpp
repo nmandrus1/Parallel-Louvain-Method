@@ -83,9 +83,13 @@ TEST(KroneckerTest, BasicKroneckerEdgeList) {
   auto list = generate_kronecker_list(5, 16, 123);
 }
 
-TEST(CudaTests, HelloCuda) {
-  Graph g(0);
-  g.hello_cuda();
+TEST(CudaTests, CudaEdgeList) {
+  auto list = generate_kronecker_list_cuda(5, 16, 123);
+}
+
+TEST(CudaTests, GraphFromCuda) {
+  Graph g = Graph::from_kronecker_cuda(2, 1, 123);
+  g.print_graph();
 }
 
 int main(int argc, char* argv[])

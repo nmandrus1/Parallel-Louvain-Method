@@ -6,7 +6,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
-void runHelloCuda();
+// cuda kernels
+int cudaInit(int rank);
+void generateKroneckerEdgeList(int scale, int edgefactor, unsigned long seed, int* start, int* end);
 
 // default constructor
 Graph::Graph(size_t vcount) : vcount(vcount), info() {
@@ -268,13 +270,18 @@ std::vector<int> Graph::parallel_top_down_bfs(const int src) const {
                   recv_buffer.data(), recv_counts.data(), rdispls.data(), MPI_INT, info.row_comm);
     // clear local frontier to prepare for next iteration
     local_frontier.clear();
-    candidate_parents.clear();
 
     // Deserialize recv_data back into a usable format, e.g., updating
     // candidate_parents or similar structures
     for (int i = 0; i < total_recv_size; i += 2) {
       int vertex = recv_buffer[i];
       int parent = recv_buffer[i + 1];
+      candidate_parents[vertex] = parent;
+    }
+
+    for(auto item: candidate_parents) {
+      auto vertex = item.first;
+      auto parent = item.second;
       // Update or process the candidate_parents information with received data
       // Be sure to handle global IDs and avoid overwriting any previously set
       // parents unless the algorithm dictates otherwise.
@@ -289,8 +296,9 @@ std::vector<int> Graph::parallel_top_down_bfs(const int src) const {
       }
     }
 
-    // wait here for other processes to finish
-    MPI_Barrier(MPI_COMM_WORLD);
+    candidate_parents.clear();
+
+
 
     if(info.rank == 0) {
       std::cout << "Iteration: " << iteration << "\n";
@@ -339,7 +347,22 @@ void Graph::print_graph() const {
 }
 
 // test CUDA function
-void Graph::hello_cuda() { runHelloCuda(); }
+Graph Graph::from_kronecker_cuda(int scale, int edgefactor, unsigned long seed) {
+  int num_vertices = 1 << scale;
+  // auto edge_list = generate_kronecker_list_cuda(scale, edgefactor, seed);
+  auto edge_list = generate_kronecker_list_cuda(scale, edgefactor, seed);
+  std::vector<int> start = std::move(edge_list[0]);
+  std::vector<int> end = std::move(edge_list[1]);
+
+  // create a vector of length of the smaller vector
+  std::vector<std::pair<int, int>> target(start.size());
+
+  for (unsigned i = 0; i < target.size(); i++)
+    target[i] = std::make_pair(start[i], end[i]);
+
+  Graph result(target, num_vertices);
+  return result;
+}
 
 std::vector<std::vector<int>> generate_kronecker_list(int scale, int edgefactor,
                                                       unsigned long seed) {
@@ -367,11 +390,6 @@ std::vector<std::vector<int>> generate_kronecker_list(int scale, int edgefactor,
       edge_list[1][i] += (jj_bit ? 1 : 0) * (1 << ib);
     }
   }
-
-  // Generate weights
-  // for (int i = 0; i < M; ++i) {
-  // ijw[2][i] = dis(gen);
-  // }
 
   // Permute vertex labels and edge list
   std::vector<int> p(num_vertices);
@@ -401,4 +419,51 @@ std::vector<std::vector<int>> generate_kronecker_list(int scale, int edgefactor,
   std::cout << "\n" << std::endl;
 
   return edge_list;
+}
+
+std::vector<std::vector<int>> generate_kronecker_list_cuda(int scale, int edgefactor, unsigned long long seed) {
+  // init cuda device by rank
+  int rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  cudaInit(rank);
+
+  int num_vertices = 1 << scale;
+  int num_edges = num_vertices * edgefactor;
+
+  // return vector
+  std::vector<std::vector<int>> edge_list(2, std::vector<int>(num_edges));
+  generateKroneckerEdgeList(scale, edgefactor, seed, edge_list[0].data(), edge_list[1].data());
+
+  // std::random_device rd;  // Seed for random number engine
+  std::mt19937 gen(seed); // Standard mersenne_twister_engine
+  std::uniform_real_distribution<> dis(0.0, 1.0);
+  // shuffle lists
+
+  // Permute vertex labels and edge list
+  std::vector<int> p(num_vertices);
+  std::iota(p.begin(), p.end(), 0);
+  std::shuffle(p.begin(), p.end(), gen);
+  for (int i = 0; i < num_edges; ++i) {
+    edge_list[0][i] = p[edge_list[0][i]];
+    edge_list[1][i] = p[edge_list[1][i]];
+  }
+
+  std::shuffle(edge_list[0].begin(), edge_list[0].end(), gen);
+  std::shuffle(edge_list[1].begin(), edge_list[1].end(), gen);
+
+ std::cout << "Start Vertex: ";
+  for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
+       ++i) { // Output first 10 edges for preview
+    std::cout << edge_list[0][i] << ", ";
+  }
+  std::cout << "\n";
+
+  std::cout << "End Vertex:   ";
+  for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
+       ++i) { // Output first 10 edges for preview
+    std::cout << edge_list[1][i] << ", ";
+  }
+  std::cout << "\n" << std::endl;
+
+  return edge_list;  
 }
