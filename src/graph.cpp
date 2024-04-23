@@ -17,7 +17,8 @@ void generateKroneckerEdgeList(int scale, int edgefactor, unsigned long seed,
                                int *start, int *end);
 
 // default constructor
-Graph::Graph(size_t vcount) : vcount(vcount), info(), output(false) {
+Graph::Graph(size_t vcount) : Graph() {
+  this->vcount = vcount;
   this->data.resize(vcount * vcount, 0);
 }
 
@@ -41,7 +42,7 @@ Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
 
 // generate a graph using kronecker algorithm
 void Graph::from_kronecker(int scale, int edgefactor, unsigned long seed) {
-  init_start_time = clock_now();
+  uint64_t start_time = clock_now();
 
   auto edge_list = generate_kronecker_list(scale, edgefactor, seed);
   int n_vertices = 1 << scale;
@@ -57,9 +58,12 @@ void Graph::from_kronecker(int scale, int edgefactor, unsigned long seed) {
 
   Graph result(target, n_vertices);
 
-  init_end_time = clock_now();
+  uint64_t end_time = clock_now();
 
   *this = result;
+
+  this->init_start_time = start_time;
+  this->init_end_time = end_time;
   return;
 }
 
@@ -415,7 +419,7 @@ double cycles_to_secs(uint64_t cycles) {
 }
 
 void Graph::print_timings() const {
-  std::cout << "Graph Initialization Time: " << cycles_to_secs(init_end_time- init_start_time) << " seconds \n";
+  std::cout << "Graph Initialization Time: " << cycles_to_secs(init_end_time - init_start_time) << " seconds \n";
   std::cout << "Total BFS time: " << cycles_to_secs(bfs_end_time - bfs_start_time) << " seconds \n";
   std::cout << "Computation time: " << cycles_to_secs(bfs_comp_time )<< " seconds\n";
   std::cout << "Communication time: " << cycles_to_secs(bfs_comm_time )<< " seconds\n";
@@ -427,7 +431,7 @@ void Graph::print_timings() const {
 // test CUDA function
 void Graph::from_kronecker_cuda(int scale, int edgefactor,
                                  unsigned long seed) {
-  init_start_time = clock_now();
+  uint64_t cuda_init_start = clock_now();
   int num_vertices = 1 << scale;
   // auto edge_list = generate_kronecker_list_cuda(scale, edgefactor, seed);
   auto edge_list = generate_kronecker_list_cuda(scale, edgefactor, seed);
@@ -441,9 +445,13 @@ void Graph::from_kronecker_cuda(int scale, int edgefactor,
     target[i] = std::make_pair(start[i], end[i]);
 
   Graph result(target, num_vertices);
-  init_end_time = clock_now();
+  uint64_t cuda_init_end = clock_now();
 
   *this = result;
+
+  this->init_start_time = cuda_init_start;
+  this->init_end_time = cuda_init_end;
+
   return;
 }
 
