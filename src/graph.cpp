@@ -410,6 +410,7 @@ void Graph::print_timings() const {
   std::cout << "Total BFS time: " << (bfs_end_time - bfs_start_time) / 512000000.0 << " seconds " << std::endl;
   std::cout << "Computation time: " << bfs_comp_time / 512000000.0 << " seconds" << std::endl;
   std::cout << "Communication time: " << bfs_comm_time / 512000000.0 << " seconds" << std::endl;
+  std::cout << "MPI I/O time: " << bfs_io_time / 512000000.0 << " seconds" << std::endl;
 }
 
 

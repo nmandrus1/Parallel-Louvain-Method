@@ -93,22 +93,7 @@ int main(int argc, char** argv) {
 
   double total_time = end - start;
 
-  if(args.output) {
-    for(int i = 0; i < comm_size; i++) {
-
-      if(rank == i) {
-        std::cout << "Rank " << rank << " Parents List = { "; 
-        for(auto p: parents) {
-          std::cout << p << ", ";
-        }
-
-        std::cout << "}\n"; 
-      }
-
-      MPI_Barrier(MPI_COMM_WORLD);
-    }
-
-    
+  if(args.output) { 
     // print timings
     for(int i = 0; i < comm_size; i++) {
       if(rank == i) {
