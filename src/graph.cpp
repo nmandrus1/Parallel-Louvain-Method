@@ -353,6 +353,9 @@ std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, 
     iteration++;
   }
 
+  if(info.rank == 0)
+    std::cout << iteration << "iterations!\n";
+
   bfs_end_time = clock_now();
   return parents;
 }
