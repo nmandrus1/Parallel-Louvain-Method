@@ -99,7 +99,7 @@ std::vector<int> Graph::get_edges_distributed(const int vert) const {
 
 // Perform a BFS from the specified source vertex and return the Parent Array
 std::vector<int> Graph::top_down_bfs(const int src) {
-  bfs_start_time = clock_now();
+    bfs_start_time = clock_now();
 
   // queue for storing future nodes to explore
   std::queue<int> q;
@@ -405,12 +405,16 @@ void Graph::print_graph() const {
   std::cout << std::endl;
 }
 
+double cycles_to_secs(uint64_t cycles) {
+  return 1.0 / (double)(cycles * 512000000);
+}
+
 void Graph::print_timings() const {
-  std::cout << "Graph Initialization Time: " << (init_end_time- init_start_time) / 512000000.0 << " seconds " << std::endl;
-  std::cout << "Total BFS time: " << (bfs_end_time - bfs_start_time) / 512000000.0 << " seconds " << std::endl;
-  std::cout << "Computation time: " << bfs_comp_time / 512000000.0 << " seconds" << std::endl;
-  std::cout << "Communication time: " << bfs_comm_time / 512000000.0 << " seconds" << std::endl;
-  std::cout << "MPI I/O time: " << bfs_io_time / 512000000.0 << " seconds" << std::endl;
+  std::cout << "Graph Initialization Time: " << cycles_to_secs(init_end_time- init_start_time) << " seconds " << std::endl;
+  std::cout << "Total BFS time: " << cycles_to_secs(bfs_end_time - bfs_start_time) << " seconds " << std::endl;
+  std::cout << "Computation time: " << cycles_to_secs(bfs_comp_time )<< " seconds" << std::endl;
+  std::cout << "Communication time: " << cycles_to_secs(bfs_comm_time )<< " seconds" << std::endl;
+  std::cout << "MPI I/O time: " << cycles_to_secs(bfs_io_time )<< " seconds" << std::endl;
 }
 
 
