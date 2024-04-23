@@ -99,6 +99,7 @@ std::vector<int> Graph::get_edges_distributed(const int vert) const {
 
 // Perform a BFS from the specified source vertex and return the Parent Array
 std::vector<int> Graph::top_down_bfs(const int src) {
+  bfs_start_time = clock_now();
 
   // queue for storing future nodes to explore
   std::queue<int> q;
@@ -110,7 +111,6 @@ std::vector<int> Graph::top_down_bfs(const int src) {
   parents[src] = src;
 
   while (!q.empty()) {
-    bfs_start_time = clock_now();
     int parent = q.front();
     q.pop();
 
