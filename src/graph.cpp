@@ -392,6 +392,8 @@ std::vector<int> Graph::parallel_top_down_bfs(const int src, int checkpoint_int)
     local_frontier.push_back(src);
   }
 
+  bfs_comm_time = 0;
+  bfs_io_time = 0;
   return this->parallel_top_down_bfs_driver(parents, local_frontier, checkpoint_int);
 }
 
