@@ -8,7 +8,8 @@
 
 // cuda kernels
 int cudaInit(int rank);
-void generateKroneckerEdgeList(int scale, int edgefactor, unsigned long seed, int* start, int* end);
+void generateKroneckerEdgeList(int scale, int edgefactor, unsigned long seed,
+                               int *start, int *end);
 
 // default constructor
 Graph::Graph(size_t vcount) : vcount(vcount), info() {
@@ -157,6 +158,103 @@ std::vector<int> Graph::btm_down_bfs(const int src) const {
   return parents;
 }
 
+// given a local list of candidate parents, communicate with all processors in
+// this row to exhange and merge all candiate parents lists together
+void Graph::broadcast_to_row(
+    std::unordered_map<int, int> &candidate_parents) const {
+
+  std::vector<std::vector<int>> send_buffers(this->info.width);
+
+  // Organize data into send buffers for each process in the row
+  for (const auto &pair : candidate_parents) {
+    int vertex = pair.first;
+    int parent = pair.second;
+    int target_process = vertex / vcount;
+
+    send_buffers[target_process].push_back(vertex);
+    send_buffers[target_process].push_back(parent);
+  }
+
+  // Prepare for MPI_Alltoallv
+  std::vector<int> send_counts(this->info.width, 0);
+  std::vector<int> sdispls(this->info.width, 0);
+  std::vector<int> total_send_buffer;
+
+  // Flatten send buffers and calculate send counts and displacements
+  for (int i = 0; i < this->info.width; ++i) {
+    sdispls[i] = total_send_buffer.size();
+    send_counts[i] = send_buffers[i].size();
+    total_send_buffer.insert(total_send_buffer.end(), send_buffers[i].begin(),
+                             send_buffers[i].end());
+  }
+
+  // Prepare receive counts and displacements (to be gathered via MPI_Alltoall)
+  std::vector<int> recv_counts(this->info.width);
+  MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT,
+               info.row_comm);
+
+  std::vector<int> rdispls(this->info.width);
+  int total_recv_size = 0;
+  for (int i = 0; i < this->info.width; ++i) {
+    rdispls[i] = total_recv_size;
+    total_recv_size += recv_counts[i];
+  }
+
+  std::vector<int> recv_buffer(total_recv_size);
+
+  // Execute the MPI_Alltoallv
+  MPI_Alltoallv(total_send_buffer.data(), send_counts.data(), sdispls.data(),
+                MPI_INT, recv_buffer.data(), recv_counts.data(), rdispls.data(),
+                MPI_INT, info.row_comm);
+
+  // Deserialize recv_data back into a usable format, e.g., updating
+  // candidate_parents or similar structures
+  for (int i = 0; i < total_recv_size; i += 2) {
+    int vertex = recv_buffer[i];
+    int parent = recv_buffer[i + 1];
+    candidate_parents[vertex] = parent;
+  }
+}
+
+// communicate with all processes and return the column frontier, set term_cond
+// to true if we are done globally
+bool Graph::gather_global_frontier(const std::vector<int> local_frontier,
+                                   std::vector<int> &global_frontier) const {
+  std::vector<int> all_local_sizes(this->info.width);
+
+  int global_frontier_size, local_frontier_size = local_frontier.size();
+  MPI_Allreduce(&local_frontier_size, &global_frontier_size, 1, MPI_INT,
+                MPI_SUM, MPI_COMM_WORLD);
+
+  if (global_frontier_size == 0) {
+    return true;
+  }
+
+  // Gather the sizes of the local frontiers from all processors in the same
+  // column
+  MPI_Allgather(&local_frontier_size, 1, MPI_INT, all_local_sizes.data(), 1,
+                MPI_INT, this->info.col_comm);
+
+  std::vector<int> displacements(this->info.width);
+  int sum = 0;
+  for (int i = 0; i < this->info.width; ++i) {
+    displacements[i] = sum;
+    sum += all_local_sizes[i];
+  }
+
+  // nothing for these procs to do
+  if (sum != 0) {
+    // Resize the global frontier to accommodate all elements
+    global_frontier.resize(sum);
+
+    // Perform the allgatherv operation
+    MPI_Allgatherv(local_frontier.data(), local_frontier_size, MPI_INT,
+                   global_frontier.data(), all_local_sizes.data(),
+                   displacements.data(), MPI_INT, this->info.col_comm);
+  }
+  return false;
+}
+
 // Perform a Parallel Top Down BFS from the specified source vertex and return
 // the Parent Array
 std::vector<int> Graph::parallel_top_down_bfs(const int src) const {
@@ -177,109 +275,33 @@ std::vector<int> Graph::parallel_top_down_bfs(const int src) const {
   // only terminates when all processes have an empty frontier
   int iteration = 1;
   while (true) {
-    int local_frontier_size = local_frontier.size();
-    std::vector<int> all_local_sizes(this->info.width);
 
-    int global_frontier_size;
-    MPI_Allreduce(&local_frontier_size, &global_frontier_size, 1, MPI_INT,
-                  MPI_SUM, MPI_COMM_WORLD);
-
-    // termination condition
-    if (global_frontier_size == 0)
+    // gather global frontier returns true when we are done
+    if(this->gather_global_frontier(local_frontier, global_frontier))
       break;
 
-    // Gather the sizes of the local frontiers from all processors in the same
-    // column
-    MPI_Allgather(&local_frontier_size, 1, MPI_INT, all_local_sizes.data(), 1,
-                  MPI_INT, this->info.col_comm);
-
-    std::vector<int> displacements(this->info.width);
-    int sum = 0;
-    for (int i = 0; i < this->info.width; ++i) {
-      displacements[i] = sum;
-      sum += all_local_sizes[i];
-    }
-
-    // nothing for these procs to do
-    if (sum != 0) {
-      // Resize the global frontier to accommodate all elements
-      global_frontier.resize(sum);
-
-      // Perform the allgatherv operation
-      MPI_Allgatherv(local_frontier.data(), local_frontier_size, MPI_INT,
-                     global_frontier.data(), all_local_sizes.data(),
-                     displacements.data(), MPI_INT, this->info.col_comm);
-
-      // if our frontier is not empty then inspect adjacent vertices
-      for (int U : global_frontier) {
-        // only check adj. if U might have an edge in our space
-        if (this->in_column(U) && parents[U - columns.first] != -1) {
-          // shift the value of U to match local indexing
-          auto connections = this->get_edges(U - columns.first);
-          // look through all connections and find any that need exploring
-          for (auto v : connections) {
-            // V is global index
-            int V = v + rows.first;
-            // if(candidate_parents[V] != -1) continue; // skip any that have
-            // already been visited
-            candidate_parents[V] = U;
-          }
+    // if our frontier is not empty then inspect adjacent vertices
+    for (int U : global_frontier) {
+      // only check adj. if U might have an edge in our space
+      if (this->in_column(U) && parents[U - columns.first] != -1) {
+        // shift the value of U to match local indexing
+        auto connections = this->get_edges(U - columns.first);
+        // look through all connections and find any that need exploring
+        for (auto v : connections) {
+          // V is global index
+          int V = v + rows.first;
+          // if(candidate_parents[V] != -1) continue; // skip any that have
+          // already been visited
+          candidate_parents[V] = U;
         }
       }
     }
 
-    std::vector<std::vector<int>> send_buffers(this->info.width);
-    
-    // Organize data into send buffers for each process in the row
-    for (const auto& pair : candidate_parents) {
-        int vertex = pair.first;
-        int parent = pair.second;
-        int target_process = vertex / vcount;
-
-        send_buffers[target_process].push_back(vertex);
-        send_buffers[target_process].push_back(parent);
-    }
-
-    // Prepare for MPI_Alltoallv
-    std::vector<int> send_counts(this->info.width, 0);
-    std::vector<int> sdispls(this->info.width, 0);
-    std::vector<int> total_send_buffer;
-
-    // Flatten send buffers and calculate send counts and displacements
-    for (int i = 0; i < this->info.width; ++i) {
-        sdispls[i] = total_send_buffer.size();
-        send_counts[i] = send_buffers[i].size();
-        total_send_buffer.insert(total_send_buffer.end(), send_buffers[i].begin(), send_buffers[i].end());
-    }
-
-    // Prepare receive counts and displacements (to be gathered via MPI_Alltoall)
-    std::vector<int> recv_counts(this->info.width);
-    MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, info.row_comm);
-
-    std::vector<int> rdispls(this->info.width);
-    int total_recv_size = 0;
-    for (int i = 0; i < this->info.width; ++i) {
-        rdispls[i] = total_recv_size;
-        total_recv_size += recv_counts[i];
-    }
-    
-    std::vector<int> recv_buffer(total_recv_size);    
-   
-    // Execute the MPI_Alltoallv
-    MPI_Alltoallv(total_send_buffer.data(), send_counts.data(), sdispls.data(), MPI_INT,
-                  recv_buffer.data(), recv_counts.data(), rdispls.data(), MPI_INT, info.row_comm);
-    // clear local frontier to prepare for next iteration
+    // Alltoallv
+    this->broadcast_to_row(candidate_parents);
     local_frontier.clear();
 
-    // Deserialize recv_data back into a usable format, e.g., updating
-    // candidate_parents or similar structures
-    for (int i = 0; i < total_recv_size; i += 2) {
-      int vertex = recv_buffer[i];
-      int parent = recv_buffer[i + 1];
-      candidate_parents[vertex] = parent;
-    }
-
-    for(auto item: candidate_parents) {
+    for (auto item : candidate_parents) {
       auto vertex = item.first;
       auto parent = item.second;
       // Update or process the candidate_parents information with received data
@@ -298,17 +320,15 @@ std::vector<int> Graph::parallel_top_down_bfs(const int src) const {
 
     candidate_parents.clear();
 
-
-
-    if(info.rank == 0) {
+    if (info.rank == 0) {
       std::cout << "Iteration: " << iteration << "\n";
       iteration++;
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    for(int i = 0; i < info.comm_size; i++) {
-      if(info.rank == i) {
+    for (int i = 0; i < info.comm_size; i++) {
+      if (info.rank == i) {
         std::cout << "Rank: " << this->info.rank << "\t {";
         for (auto v : global_frontier)
           std::cout << v << ", ";
@@ -321,17 +341,17 @@ std::vector<int> Graph::parallel_top_down_bfs(const int src) const {
     global_frontier.clear();
   }
 
-  
-  for(int i = 0; i < info.comm_size; i++) {
-    if(info.rank == i) {
+  for (int i = 0; i < info.comm_size; i++) {
+    if (info.rank == i) {
       std::cout << "Rank: " << i << " Parents array: { ";
-        for(auto v: parents) {
-          std::cout << v << ", ";
-        }
-        std::cout << "}\n";
+      for (auto v : parents) {
+        std::cout << v << ", ";
+      }
+      std::cout << "}\n";
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
+
 
   return parents;
 }
@@ -347,7 +367,8 @@ void Graph::print_graph() const {
 }
 
 // test CUDA function
-Graph Graph::from_kronecker_cuda(int scale, int edgefactor, unsigned long seed) {
+Graph Graph::from_kronecker_cuda(int scale, int edgefactor,
+                                 unsigned long seed) {
   int num_vertices = 1 << scale;
   // auto edge_list = generate_kronecker_list_cuda(scale, edgefactor, seed);
   auto edge_list = generate_kronecker_list_cuda(scale, edgefactor, seed);
@@ -421,7 +442,9 @@ std::vector<std::vector<int>> generate_kronecker_list(int scale, int edgefactor,
   return edge_list;
 }
 
-std::vector<std::vector<int>> generate_kronecker_list_cuda(int scale, int edgefactor, unsigned long long seed) {
+std::vector<std::vector<int>>
+generate_kronecker_list_cuda(int scale, int edgefactor,
+                             unsigned long long seed) {
   // init cuda device by rank
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -432,7 +455,8 @@ std::vector<std::vector<int>> generate_kronecker_list_cuda(int scale, int edgefa
 
   // return vector
   std::vector<std::vector<int>> edge_list(2, std::vector<int>(num_edges));
-  generateKroneckerEdgeList(scale, edgefactor, seed, edge_list[0].data(), edge_list[1].data());
+  generateKroneckerEdgeList(scale, edgefactor, seed, edge_list[0].data(),
+                            edge_list[1].data());
 
   // std::random_device rd;  // Seed for random number engine
   std::mt19937 gen(seed); // Standard mersenne_twister_engine
@@ -451,7 +475,7 @@ std::vector<std::vector<int>> generate_kronecker_list_cuda(int scale, int edgefa
   std::shuffle(edge_list[0].begin(), edge_list[0].end(), gen);
   std::shuffle(edge_list[1].begin(), edge_list[1].end(), gen);
 
- std::cout << "Start Vertex: ";
+  std::cout << "Start Vertex: ";
   for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
        ++i) { // Output first 10 edges for preview
     std::cout << edge_list[0][i] << ", ";
@@ -465,5 +489,5 @@ std::vector<std::vector<int>> generate_kronecker_list_cuda(int scale, int edgefa
   }
   std::cout << "\n" << std::endl;
 
-  return edge_list;  
+  return edge_list;
 }

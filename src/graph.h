@@ -39,6 +39,10 @@ class Graph {
   
   // Perform a Parallel Top Down BFS from the specified source vertex and return the Parent Array
   std::vector<int> parallel_top_down_bfs(const int src) const;
+  // helper function to broadcast candidate parents across rows
+  void broadcast_to_row(std::unordered_map<int, int> &candidate_parents) const;
+  bool global_frontier_is_empty(size_t local_frontier_size) const;
+  bool gather_global_frontier(const std::vector<int> local_frontier, std::vector<int>& global_frontier) const;
 
   // checks process info to determine if this graph has a partial edge list for v
   bool in_column(int v) const { return v >= this->columns.first && v <= this->columns.second; }
