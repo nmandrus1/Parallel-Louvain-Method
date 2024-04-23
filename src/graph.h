@@ -2,6 +2,7 @@
 #define __GRAPH_H__
 
 #include <cstddef>
+#include <cstdint>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -14,17 +15,16 @@ class Graph {
 
   public:
   // Initialize to create an empty graph with no vertices.}
-  Graph() : vcount(0), data(), info(), columns(), rows() {}
-
-
+  Graph() : vcount(0), data(), info(), columns(), rows(), output(false), bfs_comm_time(0) , bfs_comp_time(0), bfs_io_time(0) {}
+  
   // constructor creates adj. mat. with vcount^2 elements in data vector
   Graph(size_t vcount);
   // creates graph from list of edges and a vcount
   Graph(const std::vector<std::pair<int, int>> & edge_list, const size_t vcount);
 
   // generate a graph using kronecker algorithm
-  static Graph from_kronecker(int scale, int edgefactor, unsigned long seed);
-  static Graph from_kronecker_cuda(int scale, int edgefactor, unsigned long seed);
+  void from_kronecker(int scale, int edgefactor, unsigned long seed);
+  void from_kronecker_cuda(int scale, int edgefactor, unsigned long seed);
 
   // add an edge between two vertices
   void add_edge(const int v1, const int v2);
@@ -36,19 +36,17 @@ class Graph {
   std::vector<int> get_edges_distributed(const int vert) const;
 
   // Perform a Top Down BFS from the specified source vertex and return the Parent Array
-  std::vector<int> top_down_bfs(const int src) const;
+  std::vector<int> top_down_bfs(const int src);
 
   // Perform a Bottom Down BFS from the specified source vertex and return the Parent Array
   std::vector<int> btm_down_bfs(const int src) const;
   
   // Perform a Parallel Top Down BFS from the specified source vertex and return the Parent Array
-  std::vector<int> parallel_top_down_bfs(const int src, int checkpoint_int) const;
+  std::vector<int> parallel_top_down_bfs(const int src, int checkpoint_int);
   // helper function to broadcast candidate parents across rows
-  std::vector<int> parallel_top_down_bfs_driver(std::vector<int> &parents, std::vector<int> &local_frontier, int checkpoint_int) const; 
-  void broadcast_to_row(std::unordered_map<int, int> &candidate_parents) const;
-  bool global_frontier_is_empty(size_t local_frontier_size) const;
-  bool gather_global_frontier(const std::vector<int> local_frontier, std::vector<int>& global_frontier) const;
-
+  std::vector<int> parallel_top_down_bfs_driver(std::vector<int> &parents, std::vector<int> &local_frontier, int checkpoint_int); 
+  void broadcast_to_row(std::unordered_map<int, int> &candidate_parents);
+  bool gather_global_frontier(const std::vector<int> local_frontier, std::vector<int>& global_frontier);
   void checkpoint_data(const std::vector<int>& data, const int iteration, MPI_Comm comm, const char* filename) const;
 
   // checks process info to determine if this graph has a partial edge list for v
@@ -58,6 +56,9 @@ class Graph {
 
   // print adj. mat. 
   void print_graph() const;
+  void toggle_output() { output = true; }
+  void print_timings() const;
+
 
   private:
   // Bitfield Adjacency Matrix
@@ -70,6 +71,18 @@ class Graph {
   // start and end (inclusive) ownership for rows and columns
   std::pair<int, int> columns;
   std::pair<int, int> rows;
+  bool output;
+
+  
+  uint64_t init_start_time;
+  uint64_t init_end_time;
+
+  uint64_t bfs_start_time;
+  uint64_t bfs_end_time;
+
+  uint64_t bfs_comm_time;
+  uint64_t bfs_comp_time;
+  uint64_t bfs_io_time;
 };
 
 

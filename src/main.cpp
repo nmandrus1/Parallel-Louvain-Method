@@ -55,8 +55,9 @@ int main(int argc, char** argv) {
 
   // Init MPI
   MPI_Init(&argc, &argv);
-  int rank;
+  int rank, comm_size;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
 
   Args args;
   if(!parse_args(argc, argv, &args)) {
@@ -68,13 +69,18 @@ int main(int argc, char** argv) {
     args.seed = udist(rng) * rank;
   }
 
+  double start = MPI_Wtime();
+
   Graph g;
   
   if(args.cuda) {
-    g = Graph::from_kronecker_cuda(args.scale, args.edgefactor, args.seed);
+    g.from_kronecker_cuda(args.scale, args.edgefactor, args.seed);
   } else {
-    g = Graph::from_kronecker(args.scale, args.edgefactor, args.seed);
+    g.from_kronecker(args.scale, args.edgefactor, args.seed);
   }
+
+  if(args.output) 
+    g.toggle_output();
 
   std::vector<int> parents;
   if(args.parallel) {
@@ -83,7 +89,37 @@ int main(int argc, char** argv) {
     parents = g.top_down_bfs(0);
   }
 
+  double end = MPI_Wtime();
 
+  double total_time = end - start;
+
+  if(args.output) {
+    for(int i = 0; i < comm_size; i++) {
+
+      if(rank == i) {
+        std::cout << "Rank " << rank << " Parents List = { "; 
+        for(auto p: parents) {
+          std::cout << p << ", ";
+        }
+
+        std::cout << "}\n"; 
+      }
+
+      MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    
+    // print timings
+    for(int i = 0; i < comm_size; i++) {
+      if(rank == i) {
+        std::cout << "Rank " << rank << ": Total Time " << total_time << std::endl; 
+        g.print_timings();
+        std::cout << std::endl;
+      }
+
+      MPI_Barrier(MPI_COMM_WORLD);
+    }
+  }
 
   MPI_Finalize();
 }

@@ -1,5 +1,8 @@
 #include "graph.h"
+#include "clockcycle.h"
+
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <mpi.h>
 #include <queue>
@@ -14,12 +17,11 @@ void generateKroneckerEdgeList(int scale, int edgefactor, unsigned long seed,
                                int *start, int *end);
 
 // default constructor
-Graph::Graph(size_t vcount) : vcount(vcount), info() {
+Graph::Graph(size_t vcount) : vcount(vcount), info(), output(false) {
   this->data.resize(vcount * vcount, 0);
 }
 
 // construct a graph from an edge list
-
 Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
              const size_t vcount)
     : Graph(vcount) {
@@ -38,7 +40,9 @@ Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
 }
 
 // generate a graph using kronecker algorithm
-Graph Graph::from_kronecker(int scale, int edgefactor, unsigned long seed) {
+void Graph::from_kronecker(int scale, int edgefactor, unsigned long seed) {
+  init_start_time = clock_now();
+
   auto edge_list = generate_kronecker_list(scale, edgefactor, seed);
   int n_vertices = 1 << scale;
 
@@ -52,7 +56,11 @@ Graph Graph::from_kronecker(int scale, int edgefactor, unsigned long seed) {
     target[i] = std::make_pair(start[i], end[i]);
 
   Graph result(target, n_vertices);
-  return result;
+
+  init_end_time = clock_now();
+
+  *this = result;
+  return;
 }
 
 // add an edge between v1 and v2
@@ -90,7 +98,8 @@ std::vector<int> Graph::get_edges_distributed(const int vert) const {
 }
 
 // Perform a BFS from the specified source vertex and return the Parent Array
-std::vector<int> Graph::top_down_bfs(const int src) const {
+std::vector<int> Graph::top_down_bfs(const int src) {
+
   // queue for storing future nodes to explore
   std::queue<int> q;
   q.push(src);
@@ -101,6 +110,7 @@ std::vector<int> Graph::top_down_bfs(const int src) const {
   parents[src] = src;
 
   while (!q.empty()) {
+    bfs_start_time = clock_now();
     int parent = q.front();
     q.pop();
 
@@ -112,14 +122,11 @@ std::vector<int> Graph::top_down_bfs(const int src) const {
       if (parents[v] == -1) {
         parents[v] = parent;
         q.push(v);
-        // visited.insert(v);
       }
     }
-
-    // insert parent into visited list
-    // visited.insert(parent);
   }
 
+  bfs_end_time = clock_now();
   return parents;
 }
 
@@ -163,7 +170,7 @@ std::vector<int> Graph::btm_down_bfs(const int src) const {
 // given a local list of candidate parents, communicate with all processors in
 // this row to exhange and merge all candiate parents lists together
 void Graph::broadcast_to_row(
-    std::unordered_map<int, int> &candidate_parents) const {
+    std::unordered_map<int, int> &candidate_parents) {
 
   std::vector<std::vector<int>> send_buffers(this->info.width);
 
@@ -192,8 +199,11 @@ void Graph::broadcast_to_row(
 
   // Prepare receive counts and displacements (to be gathered via MPI_Alltoall)
   std::vector<int> recv_counts(this->info.width);
+
+  uint64_t comm_start = clock_now();
   MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT,
                info.row_comm);
+  bfs_comm_time += clock_now() - comm_start;
 
   std::vector<int> rdispls(this->info.width);
   int total_recv_size = 0;
@@ -205,9 +215,11 @@ void Graph::broadcast_to_row(
   std::vector<int> recv_buffer(total_recv_size);
 
   // Execute the MPI_Alltoallv
+  comm_start = clock_now();
   MPI_Alltoallv(total_send_buffer.data(), send_counts.data(), sdispls.data(),
                 MPI_INT, recv_buffer.data(), recv_counts.data(), rdispls.data(),
                 MPI_INT, info.row_comm);
+  bfs_comm_time += clock_now() - comm_start;
 
   // Deserialize recv_data back into a usable format, e.g., updating
   // candidate_parents or similar structures
@@ -221,12 +233,15 @@ void Graph::broadcast_to_row(
 // communicate with all processes and return the column frontier, set term_cond
 // to true if we are done globally
 bool Graph::gather_global_frontier(const std::vector<int> local_frontier,
-                                   std::vector<int> &global_frontier) const {
-  std::vector<int> all_local_sizes(this->info.width);
+                                   std::vector<int> &global_frontier) {
 
+  std::vector<int> all_local_sizes(this->info.width);
   int global_frontier_size, local_frontier_size = local_frontier.size();
+
+  uint64_t comm_start = clock_now();
   MPI_Allreduce(&local_frontier_size, &global_frontier_size, 1, MPI_INT,
                 MPI_SUM, MPI_COMM_WORLD);
+  bfs_comm_time += clock_now() - comm_start;
 
   if (global_frontier_size == 0) {
     return true;
@@ -234,8 +249,10 @@ bool Graph::gather_global_frontier(const std::vector<int> local_frontier,
 
   // Gather the sizes of the local frontiers from all processors in the same
   // column
+  comm_start = clock_now();
   MPI_Allgather(&local_frontier_size, 1, MPI_INT, all_local_sizes.data(), 1,
                 MPI_INT, this->info.col_comm);
+  bfs_comm_time += clock_now() - comm_start;
 
   std::vector<int> displacements(this->info.width);
   int sum = 0;
@@ -250,16 +267,19 @@ bool Graph::gather_global_frontier(const std::vector<int> local_frontier,
     global_frontier.resize(sum);
 
     // Perform the allgatherv operation
+    comm_start = clock_now();
     MPI_Allgatherv(local_frontier.data(), local_frontier_size, MPI_INT,
                    global_frontier.data(), all_local_sizes.data(),
                    displacements.data(), MPI_INT, this->info.col_comm);
+    bfs_comm_time += clock_now() - comm_start;
+
   }
   return false;
 }
 
 // given a parents list and local frontier, start BFS
-std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, std::vector<int> &local_frontier, int checkpoint_int) const {
-
+std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, std::vector<int> &local_frontier, int checkpoint_int) {
+ 
   std::stringstream s;  
   s << "checkpoint" << info.i << ".bin";
   std::string fname = s.str();
@@ -269,14 +289,17 @@ std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, 
 
   // outer loop
   // only terminates when all processes have an empty frontier
+
   int iteration = 1;
   while (true) {
+    bfs_start_time = clock_now();
 
     // gather global frontier returns true when we are done
     if(this->gather_global_frontier(local_frontier, global_frontier))
       break;
 
     // if our frontier is not empty then inspect adjacent vertices
+    uint64_t comp_start = clock_now();
     for (int U : global_frontier) {
       // only check adj. if U might have an edge in our space
       if (this->in_column(U) && parents[U - columns.first] != -1) {
@@ -292,11 +315,13 @@ std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, 
         }
       }
     }
+    bfs_comp_time += clock_now() - comp_start;
 
     // Alltoallv
     this->broadcast_to_row(candidate_parents);
     local_frontier.clear();
 
+    comp_start = clock_now();
     for (auto item : candidate_parents) {
       auto vertex = item.first;
       auto parent = item.second;
@@ -313,50 +338,22 @@ std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, 
         }
       }
     }
+    bfs_comp_time += clock_now() - comp_start;
 
     candidate_parents.clear();
-
-    // if (info.rank == 0) {
-    //   std::cout << "Iteration: " << iteration << "\n";
-    //   iteration++;
-    // }
-
-    // MPI_Barrier(MPI_COMM_WORLD);
-
-    // for (int i = 0; i < info.comm_size; i++) {
-    //   if (info.rank == i) {
-    //     std::cout << "Rank: " << this->info.rank << "\t {";
-    //     for (auto v : global_frontier)
-    //       std::cout << v << ", ";
-    //     std::cout << "}" << std::endl;
-    //   }
-
-    //   MPI_Barrier(MPI_COMM_WORLD);
-    // }
-
     global_frontier.clear();
 
     // checkpointing 
     if (checkpoint_int != 0 && iteration % checkpoint_int == 0) {
+      uint64_t io_start =clock_now();
       checkpoint_data(parents, iteration, this->info.col_comm, fname.data());
-
-      for (int i = 0; i < info.comm_size; i++) {
-        if (info.rank == i) {
-          std::cout << "Rank: " << i << " Parents array: { ";
-          for (auto v : parents) {
-            std::cout << v << ", ";
-          }
-          std::cout << "}\n";
-        }
-        MPI_Barrier(MPI_COMM_WORLD);
-      }
+      bfs_io_time += clock_now() - io_start;
     }
 
     iteration++;
   }
 
-
-
+  bfs_end_time = clock_now();
   return parents;
 }
 
@@ -377,14 +374,14 @@ void Graph::checkpoint_data(const std::vector<int>& data, const int iteration, M
     // Close the file
     MPI_File_close(&fh);
     
-    if (info.rank == 0) {
+    if (info.rank == 0 && output) {
         std::cout << "Checkpoint at iteration " << iteration << " written successfully.\n";
     }
 }
 
 // Perform a Parallel Top Down BFS from the specified source vertex and return
 // the Parent Array
-std::vector<int> Graph::parallel_top_down_bfs(const int src, int checkpoint_int) const {
+std::vector<int> Graph::parallel_top_down_bfs(const int src, int checkpoint_int) {
   std::vector<int> parents(this->vcount, -1);
   // candidate_parents[src] = src;
   std::vector<int> local_frontier ;
@@ -408,11 +405,19 @@ void Graph::print_graph() const {
   std::cout << std::endl;
 }
 
+void Graph::print_timings() const {
+  std::cout << "Graph Initialization Time: " << (init_end_time- init_start_time) / 512000000.0 << " seconds " << std::endl;
+  std::cout << "Total BFS time: " << (bfs_end_time - bfs_start_time) / 512000000.0 << " seconds " << std::endl;
+  std::cout << "Computation time: " << bfs_comp_time / 512000000.0 << " seconds" << std::endl;
+  std::cout << "Communication time: " << bfs_comm_time / 512000000.0 << " seconds" << std::endl;
+}
+
 
 
 // test CUDA function
-Graph Graph::from_kronecker_cuda(int scale, int edgefactor,
+void Graph::from_kronecker_cuda(int scale, int edgefactor,
                                  unsigned long seed) {
+  init_start_time = clock_now();
   int num_vertices = 1 << scale;
   // auto edge_list = generate_kronecker_list_cuda(scale, edgefactor, seed);
   auto edge_list = generate_kronecker_list_cuda(scale, edgefactor, seed);
@@ -426,7 +431,10 @@ Graph Graph::from_kronecker_cuda(int scale, int edgefactor,
     target[i] = std::make_pair(start[i], end[i]);
 
   Graph result(target, num_vertices);
-  return result;
+  init_end_time = clock_now();
+
+  *this = result;
+  return;
 }
 
 std::vector<std::vector<int>> generate_kronecker_list(int scale, int edgefactor,
@@ -518,21 +526,9 @@ generate_kronecker_list_cuda(int scale, int edgefactor,
   std::shuffle(edge_list[0].begin(), edge_list[0].end(), gen);
   std::shuffle(edge_list[1].begin(), edge_list[1].end(), gen);
 
-  // std::cout << "Start Vertex: ";
-  // for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
-  //      ++i) { // Output first 10 edges for preview
-  //   std::cout << edge_list[0][i] << ", ";
-  // }
-  // std::cout << "\n";
-
-  // std::cout << "End Vertex:   ";
-  // for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
-  //      ++i) { // Output first 10 edges for preview
-  //   std::cout << edge_list[1][i] << ", ";
-  // }
-  // std::cout << "\n" << std::endl;
 
   return edge_list;
 }
+
 
 

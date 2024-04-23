@@ -88,12 +88,14 @@ TEST(CudaTests, CudaEdgeList) {
 }
 
 TEST(CudaTests, GraphFromCuda) {
-  Graph g = Graph::from_kronecker_cuda(2, 1, 123);
+  Graph g;
+  g.from_kronecker_cuda(2, 1, 123);
   g.print_graph();
 }
 
 TEST(CudaTests, BigGraphFromCuda) {
-  Graph g = Graph::from_kronecker_cuda(5, 8, 123);
+  Graph g;
+  g.from_kronecker_cuda(5, 8, 123);
   g.print_graph();
 }
 

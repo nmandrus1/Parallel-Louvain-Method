@@ -31,8 +31,10 @@ TEST(MPITests, ParallelBfsTest) {
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  Graph g = Graph::from_kronecker(2, 2, 123);
-  auto parents = g.parallel_top_down_bfs(0);
+  Graph g;
+  g.from_kronecker(2, 2, 123);
+
+  auto parents = g.parallel_top_down_bfs(0, 0);
 
   if(rank == 0) {
     std::vector<int> expected = {0, -1, 0, 2};
@@ -61,7 +63,8 @@ TEST(MPITests, VertexOwnership) {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   // kronecker of scale 2 -> 4 vertices per graph
-  Graph g = Graph::from_kronecker(scale, 1, 123);
+  Graph g;
+  g.from_kronecker(scale, 1, 123);
 
   if(rank == 0) {
     ASSERT_TRUE(g.contains(0));
