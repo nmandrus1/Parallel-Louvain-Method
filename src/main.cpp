@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
     // print timings
     for(int i = 0; i < comm_size; i++) {
       if(rank == i) {
-        std::cout << "Rank " << rank << ": Total Time " << total_time << std::endl; 
+        std::cout << "Rank " << rank << ": Total Time " << total_time << "\n"; 
         g.print_timings();
         std::cout << std::endl;
       }
