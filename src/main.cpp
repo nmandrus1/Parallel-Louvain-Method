@@ -82,12 +82,19 @@ int main(int argc, char** argv) {
   if(args.output) 
     g.toggle_output();
 
+  double bfs_start, bfs_end;
   std::vector<int> parents;
   if(args.parallel) {
+    bfs_start = MPI_Wtime();
     parents = g.parallel_top_down_bfs(0, args.checkpoint_int);
+    bfs_end = MPI_Wtime();
   } else {
+    bfs_start = MPI_Wtime();
     parents = g.top_down_bfs(0);
+    bfs_end = MPI_Wtime();
   }
+  
+  std::cout << "Rank " << rank << ": BFS MPI_Wtime Total Time " << (bfs_end - bfs_start)<< std::endl; 
 
   double end = MPI_Wtime();
 
