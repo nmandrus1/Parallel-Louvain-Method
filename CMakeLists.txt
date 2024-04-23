@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+set(CMAKE_CXX_COMPILER mpicxx)
 project(Graph500 LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 14)
@@ -12,6 +13,7 @@ if(POLICY CMP0074)
 endif()
 
 find_package(MPI REQUIRED)
+message(STATUS "MPI include path: ${MPI_INCLUDE_PATH}")
 
 enable_testing()
 

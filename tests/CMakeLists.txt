@@ -1,4 +1,5 @@
 include_directories(${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR})
+include_directories(${MPI_INCLUDE_PATH})
 
 add_executable(runUnitTests test_main.cpp)
 
