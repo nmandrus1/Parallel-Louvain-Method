@@ -406,7 +406,7 @@ void Graph::print_graph() const {
 }
 
 double cycles_to_secs(uint64_t cycles) {
-  return 1.0 / (double)(cycles * 512000000);
+  return (double)(cycles * 512000000);
 }
 
 void Graph::print_timings() const {
