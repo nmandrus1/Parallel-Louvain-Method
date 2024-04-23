@@ -1,5 +1,7 @@
 # helix ignore file
 .ignore
+#sync script
+sync.sh
 
 # Compiled Object files
 **/.DS_Store
