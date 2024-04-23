@@ -412,11 +412,11 @@ double cycles_to_secs(uint64_t cycles) {
 }
 
 void Graph::print_timings() const {
-  std::cout << "Graph Initialization Time: " << cycles_to_secs(init_end_time- init_start_time) << " seconds " << std::endl;
-  std::cout << "Total BFS time: " << cycles_to_secs(bfs_end_time - bfs_start_time) << " seconds " << std::endl;
-  std::cout << "Computation time: " << cycles_to_secs(bfs_comp_time )<< " seconds" << std::endl;
-  std::cout << "Communication time: " << cycles_to_secs(bfs_comm_time )<< " seconds" << std::endl;
-  std::cout << "MPI I/O time: " << cycles_to_secs(bfs_io_time )<< " seconds" << std::endl;
+  std::cout << "Graph Initialization Time: " << cycles_to_secs(init_end_time- init_start_time) << " seconds \n";
+  std::cout << "Total BFS time: " << cycles_to_secs(bfs_end_time - bfs_start_time) << " seconds \n";
+  std::cout << "Computation time: " << cycles_to_secs(bfs_comp_time )<< " seconds\n";
+  std::cout << "Communication time: " << cycles_to_secs(bfs_comm_time )<< " seconds\n";
+  std::cout << "MPI I/O time: " << cycles_to_secs(bfs_io_time )<< " seconds\n";
 }
 
 
