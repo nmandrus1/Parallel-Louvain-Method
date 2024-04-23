@@ -92,6 +92,11 @@ TEST(CudaTests, GraphFromCuda) {
   g.print_graph();
 }
 
+TEST(CudaTests, BigGraphFromCuda) {
+  Graph g = Graph::from_kronecker_cuda(5, 8, 123);
+  g.print_graph();
+}
+
 int main(int argc, char* argv[])
 {
   ::testing::InitGoogleTest(&argc, argv);
