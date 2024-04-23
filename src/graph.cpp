@@ -5,6 +5,8 @@
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
+#include <sstream>
+#include <string>
 
 // cuda kernels
 int cudaInit(int rank);
@@ -255,21 +257,15 @@ bool Graph::gather_global_frontier(const std::vector<int> local_frontier,
   return false;
 }
 
-// Perform a Parallel Top Down BFS from the specified source vertex and return
-// the Parent Array
-std::vector<int> Graph::parallel_top_down_bfs(const int src) const {
-  // initialize algorithm
-  std::vector<int> parents(this->vcount, -1);
+// given a parents list and local frontier, start BFS
+std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, std::vector<int> &local_frontier, int checkpoint_int) const {
+
+  std::stringstream s;  
+  s << "checkpoint" << info.i << ".bin";
+  std::string fname = s.str();
+
   std::unordered_map<int, int> candidate_parents;
-  // candidate_parents[src] = src;
-
-  std::vector<int> local_frontier, global_frontier;
-
-  // only add src to frontier if it is owned by the current graph object
-  if (this->in_column(src)) {
-    parents[src] = src;
-    local_frontier.push_back(src);
-  }
+  std::vector<int> global_frontier;
 
   // outer loop
   // only terminates when all processes have an empty frontier
@@ -320,40 +316,86 @@ std::vector<int> Graph::parallel_top_down_bfs(const int src) const {
 
     candidate_parents.clear();
 
-    if (info.rank == 0) {
-      std::cout << "Iteration: " << iteration << "\n";
-      iteration++;
-    }
+    // if (info.rank == 0) {
+    //   std::cout << "Iteration: " << iteration << "\n";
+    //   iteration++;
+    // }
 
-    MPI_Barrier(MPI_COMM_WORLD);
+    // MPI_Barrier(MPI_COMM_WORLD);
 
-    for (int i = 0; i < info.comm_size; i++) {
-      if (info.rank == i) {
-        std::cout << "Rank: " << this->info.rank << "\t {";
-        for (auto v : global_frontier)
-          std::cout << v << ", ";
-        std::cout << "}" << std::endl;
-      }
+    // for (int i = 0; i < info.comm_size; i++) {
+    //   if (info.rank == i) {
+    //     std::cout << "Rank: " << this->info.rank << "\t {";
+    //     for (auto v : global_frontier)
+    //       std::cout << v << ", ";
+    //     std::cout << "}" << std::endl;
+    //   }
 
-      MPI_Barrier(MPI_COMM_WORLD);
-    }
+    //   MPI_Barrier(MPI_COMM_WORLD);
+    // }
 
     global_frontier.clear();
+
+    // checkpointing 
+    if (checkpoint_int != 0 && iteration % checkpoint_int == 0) {
+      checkpoint_data(parents, iteration, this->info.col_comm, fname.data());
+
+      for (int i = 0; i < info.comm_size; i++) {
+        if (info.rank == i) {
+          std::cout << "Rank: " << i << " Parents array: { ";
+          for (auto v : parents) {
+            std::cout << v << ", ";
+          }
+          std::cout << "}\n";
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+      }
+    }
+
+    iteration++;
   }
 
-  for (int i = 0; i < info.comm_size; i++) {
-    if (info.rank == i) {
-      std::cout << "Rank: " << i << " Parents array: { ";
-      for (auto v : parents) {
-        std::cout << v << ", ";
-      }
-      std::cout << "}\n";
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
-  }
 
 
   return parents;
+}
+
+// write parents list to file
+void Graph::checkpoint_data(const std::vector<int>& data, const int iteration, MPI_Comm comm, const char* filename) const {
+    MPI_File fh;
+    MPI_Status status;
+
+    // Open the file for writing
+    MPI_File_open(comm, filename, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
+
+    // Calculate the offset for each process
+    MPI_Offset offset = info.rank * sizeof(int) * data.size();
+
+    // Write the data
+    MPI_File_write_at(fh, offset, data.data(), data.size(), MPI_INT, &status);
+
+    // Close the file
+    MPI_File_close(&fh);
+    
+    if (info.rank == 0) {
+        std::cout << "Checkpoint at iteration " << iteration << " written successfully.\n";
+    }
+}
+
+// Perform a Parallel Top Down BFS from the specified source vertex and return
+// the Parent Array
+std::vector<int> Graph::parallel_top_down_bfs(const int src, int checkpoint_int) const {
+  std::vector<int> parents(this->vcount, -1);
+  // candidate_parents[src] = src;
+  std::vector<int> local_frontier ;
+
+  // only add src to frontier if it is owned by the current graph object
+  if (this->in_column(src)) {
+    parents[src] = src;
+    local_frontier.push_back(src);
+  }
+
+  return this->parallel_top_down_bfs_driver(parents, local_frontier, checkpoint_int);
 }
 
 void Graph::print_graph() const {
@@ -365,6 +407,8 @@ void Graph::print_graph() const {
   }
   std::cout << std::endl;
 }
+
+
 
 // test CUDA function
 Graph Graph::from_kronecker_cuda(int scale, int edgefactor,
@@ -423,21 +467,20 @@ std::vector<std::vector<int>> generate_kronecker_list(int scale, int edgefactor,
 
   std::shuffle(edge_list[0].begin(), edge_list[0].end(), gen);
   std::shuffle(edge_list[1].begin(), edge_list[1].end(), gen);
-  // std::shuffle(ijw[2].begin(), ijw[2].end(), gen);
 
-  std::cout << "Start Vertex: ";
-  for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
-       ++i) { // Output first 10 edges for preview
-    std::cout << edge_list[0][i] << ", ";
-  }
-  std::cout << "\n";
+  // std::cout << "Start Vertex: ";
+  // for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
+  //      ++i) { // Output first 10 edges for preview
+  //   std::cout << edge_list[0][i] << ", ";
+  // }
+  // std::cout << "\n";
 
-  std::cout << "End Vertex:   ";
-  for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
-       ++i) { // Output first 10 edges for preview
-    std::cout << edge_list[1][i] << ", ";
-  }
-  std::cout << "\n" << std::endl;
+  // std::cout << "End Vertex:   ";
+  // for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
+  //      ++i) { // Output first 10 edges for preview
+  //   std::cout << edge_list[1][i] << ", ";
+  // }
+  // std::cout << "\n" << std::endl;
 
   return edge_list;
 }
@@ -475,19 +518,21 @@ generate_kronecker_list_cuda(int scale, int edgefactor,
   std::shuffle(edge_list[0].begin(), edge_list[0].end(), gen);
   std::shuffle(edge_list[1].begin(), edge_list[1].end(), gen);
 
-  std::cout << "Start Vertex: ";
-  for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
-       ++i) { // Output first 10 edges for preview
-    std::cout << edge_list[0][i] << ", ";
-  }
-  std::cout << "\n";
+  // std::cout << "Start Vertex: ";
+  // for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
+  //      ++i) { // Output first 10 edges for preview
+  //   std::cout << edge_list[0][i] << ", ";
+  // }
+  // std::cout << "\n";
 
-  std::cout << "End Vertex:   ";
-  for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
-       ++i) { // Output first 10 edges for preview
-    std::cout << edge_list[1][i] << ", ";
-  }
-  std::cout << "\n" << std::endl;
+  // std::cout << "End Vertex:   ";
+  // for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
+  //      ++i) { // Output first 10 edges for preview
+  //   std::cout << edge_list[1][i] << ", ";
+  // }
+  // std::cout << "\n" << std::endl;
 
   return edge_list;
 }
+
+
