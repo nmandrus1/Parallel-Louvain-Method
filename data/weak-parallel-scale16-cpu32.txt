@@ -1,0 +1,10 @@
+ERROR: value of 32 is not square and therefore cannot be partitoned properly. Aborting...
+------------------------------------------------------------
+A process or daemon was unable to complete a TCP connection
+to another process:
+  Local host:    dcs145
+  Remote host:   dcs196
+This is usually caused by a firewall on the remote host. Please
+check that any firewall (e.g., iptables) has been disabled and
+try again.
+------------------------------------------------------------
