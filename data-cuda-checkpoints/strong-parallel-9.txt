@@ -1,0 +1,3 @@
+Checkpoint at iteration 1 written successfully.
+Checkpoint at iteration 2 written successfully.
+Checkpoint at iteration 3 written successfully.

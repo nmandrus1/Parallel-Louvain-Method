@@ -1,0 +1,113 @@
+6iterations!
+Rank 0: Total Time 0.335595
+Graph Initialization Time: 0.282448 seconds 
+Total BFS time: 9.53398e-05 seconds 
+Computation time: 0.0353593 seconds
+Communication time: 0.0144283 seconds
+MPI I/O time: 0 seconds
+
+Rank 1: Total Time 0.335739
+Graph Initialization Time: 0.282977 seconds 
+Total BFS time: 7.53223e-05 seconds 
+Computation time: 2.20703e-05 seconds
+Communication time: 0.0501512 seconds
+MPI I/O time: 0 seconds
+
+Rank 2: Total Time 0.336604
+Graph Initialization Time: 0.283013 seconds 
+Total BFS time: 7.5793e-05 seconds 
+Computation time: 2.225e-05 seconds
+Communication time: 0.0501825 seconds
+MPI I/O time: 0 seconds
+
+Rank 3: Total Time 0.336611
+Graph Initialization Time: 0.283053 seconds 
+Total BFS time: 7.49258e-05 seconds 
+Computation time: 2.18828e-05 seconds
+Communication time: 0.0501496 seconds
+MPI I/O time: 0 seconds
+
+Rank 4: Total Time 0.335672
+Graph Initialization Time: 0.282464 seconds 
+Total BFS time: 7.7332e-05 seconds 
+Computation time: 0.000210395 seconds
+Communication time: 0.050183 seconds
+MPI I/O time: 0 seconds
+
+Rank 5: Total Time 0.336612
+Graph Initialization Time: 0.283057 seconds 
+Total BFS time: 7.75586e-05 seconds 
+Computation time: 0.0327494 seconds
+Communication time: 0.0168129 seconds
+MPI I/O time: 0 seconds
+
+Rank 6: Total Time 0.336617
+Graph Initialization Time: 0.28317 seconds 
+Total BFS time: 7.74316e-05 seconds 
+Computation time: 2.15859e-05 seconds
+Communication time: 0.0500332 seconds
+MPI I/O time: 0 seconds
+
+Rank 7: Total Time 0.335779
+Graph Initialization Time: 0.282949 seconds 
+Total BFS time: 7.8166e-05 seconds 
+Computation time: 2.17402e-05 seconds
+Communication time: 0.0501443 seconds
+MPI I/O time: 0 seconds
+
+Rank 8: Total Time 0.335672
+Graph Initialization Time: 0.282712 seconds 
+Total BFS time: 5.66797e-06 seconds 
+Computation time: 0.000198684 seconds
+Communication time: 0.0500003 seconds
+MPI I/O time: 0 seconds
+
+Rank 9: Total Time 0.336393
+Graph Initialization Time: 0.283032 seconds 
+Total BFS time: 1.85195e-05 seconds 
+Computation time: 2.21992e-05 seconds
+Communication time: 0.0501504 seconds
+MPI I/O time: 0 seconds
+
+Rank 10: Total Time 0.33557
+Graph Initialization Time: 0.283562 seconds 
+Total BFS time: 3.58203e-06 seconds 
+Computation time: 0.0480146 seconds
+Communication time: 0.000574615 seconds
+MPI I/O time: 0 seconds
+
+Rank 11: Total Time 0.336391
+Graph Initialization Time: 0.283031 seconds 
+Total BFS time: 6e-06 seconds 
+Computation time: 2.19492e-05 seconds
+Communication time: 0.050151 seconds
+MPI I/O time: 0 seconds
+
+Rank 12: Total Time 0.335588
+Graph Initialization Time: 0.283425 seconds 
+Total BFS time: 6.13906e-05 seconds 
+Computation time: 0.00029407 seconds
+Communication time: 0.0491619 seconds
+MPI I/O time: 0 seconds
+
+Rank 13: Total Time 0.335751
+Graph Initialization Time: 0.282968 seconds 
+Total BFS time: 6.22285e-05 seconds 
+Computation time: 2.17148e-05 seconds
+Communication time: 0.0501491 seconds
+MPI I/O time: 0 seconds
+
+Rank 14: Total Time 0.336604
+Graph Initialization Time: 0.283065 seconds 
+Total BFS time: 6.00312e-05 seconds 
+Computation time: 2.21328e-05 seconds
+Communication time: 0.0501312 seconds
+MPI I/O time: 0 seconds
+
+Rank 15: Total Time 0.335781
+Graph Initialization Time: 0.282984 seconds 
+Total BFS time: 5.83848e-05 seconds 
+Computation time: 0.0327486 seconds
+Communication time: 0.0168349 seconds
+MPI I/O time: 0 seconds
+

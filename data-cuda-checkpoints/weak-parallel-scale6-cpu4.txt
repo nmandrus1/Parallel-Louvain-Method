@@ -1,0 +1,33 @@
+Checkpoint at iteration 1 written successfully.
+Checkpoint at iteration 2 written successfully.
+Checkpoint at iteration 3 written successfully.
+Checkpoint at iteration 4 written successfully.
+5iterations!
+Rank 0: Total Time 0.740065
+Graph Initialization Time: 0.731435 seconds 
+Total BFS time: 0.00011524 seconds 
+Computation time: 0.000475836 seconds
+Communication time: 0.000547221 seconds
+MPI I/O time: 0.00589078 seconds
+
+Rank 1: Total Time 0.739834
+Graph Initialization Time: 0.731332 seconds 
+Total BFS time: 6.06172e-05 seconds 
+Computation time: 2.83789e-06 seconds
+Communication time: 0.000881828 seconds
+MPI I/O time: 0.00608255 seconds
+
+Rank 2: Total Time 0.740077
+Graph Initialization Time: 0.731404 seconds 
+Total BFS time: 6.91895e-05 seconds 
+Computation time: 5.01738e-05 seconds
+Communication time: 0.00103433 seconds
+MPI I/O time: 0.0058781 seconds
+
+Rank 3: Total Time 0.739834
+Graph Initialization Time: 0.731358 seconds 
+Total BFS time: 3.84961e-06 seconds 
+Computation time: 0.000447086 seconds
+Communication time: 0.000415016 seconds
+MPI I/O time: 0.00602858 seconds
+
