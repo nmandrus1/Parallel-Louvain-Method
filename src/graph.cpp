@@ -1,5 +1,4 @@
 #include "graph.h"
-#include "clockcycle.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -25,12 +24,36 @@ Graph::Graph(size_t vcount) : Graph() {
 // construct a graph from an edge list
 Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
              const size_t vcount)
-    : Graph(vcount) {
+    : Graph() {
+
+    this->vcount = vcount;
+    std::vector<int> adj_mat(vcount * vcount, 0);
+
   // loop over every edge pair and add it to the graph
   for (auto pair : edge_list) {
     if (pair.first == pair.second)
       continue;
-    this->add_edge(pair.first, pair.second);
+
+    // 1-d indexing
+    adj_mat[pair.first * this->vcount + pair.second] = true;
+    adj_mat[pair.second * this->vcount + pair.first] = true;
+  }
+
+  //sparsify
+  int nnz = 0;
+  this->row_index.push_back(nnz);
+
+  for (unsigned i = 0; i < vcount; i++) {
+    for (unsigned j = 0; j < vcount; j++) {
+      int entry = adj_mat[i * vcount + j];
+      if(entry != 0) {
+        this->data.push_back(entry);
+        this->column_index.push_back(j);
+        nnz += 1;
+      }
+    }
+
+    this->row_index.push_back(nnz);
   }
 
   this->rows.first = vcount * this->info.j;
@@ -42,7 +65,6 @@ Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
 
 // generate a graph using kronecker algorithm
 void Graph::from_kronecker(int scale, int edgefactor, unsigned long seed) {
-  uint64_t start_time = clock_now();
 
   auto edge_list = generate_kronecker_list(scale, edgefactor, seed);
   int n_vertices = 1 << scale;
@@ -58,44 +80,29 @@ void Graph::from_kronecker(int scale, int edgefactor, unsigned long seed) {
 
   Graph result(target, n_vertices);
 
-  uint64_t end_time = clock_now();
 
   *this = result;
 
-  this->init_start_time = start_time;
-  this->init_end_time = end_time;
   return;
 }
 
-// add an edge between v1 and v2
-void Graph::add_edge(const int v1, const int v2) {
-  // 1-d indexing
-  this->data[v1 * this->vcount + v2] = true;
-  this->data[v2 * this->vcount + v1] = true;
-}
+// // add an edge between v1 and v2
+// void Graph::add_edge(const int v1, const int v2) {
+//   // 1-d indexing
+//   this->data[v1 * this->vcount + v2] = true;
+//   this->data[v2 * this->vcount + v1] = true;
+// }
 
 // get the list of vertices vert is connected to
 std::vector<int> Graph::get_edges(const int vert) const {
   std::vector<int> ret;
 
-  // loop over every vertex and push back those vert is adjacent to
-  for (unsigned i = 0; i < vcount; i++) {
-    // if there exists an edge here
-    if (this->data[vert + (vcount * i)])
-      ret.push_back(i);
-  }
-
-  return ret;
-}
-
-std::vector<int> Graph::get_edges_distributed(const int vert) const {
-  std::vector<int> ret;
+  unsigned row_start = this->row_index[vert];
+  unsigned row_end = this->row_index[vert + 1];
 
   // loop over every vertex and push back those vert is adjacent to
-  for (unsigned i = 0; i < vcount; i++) {
-    // if there exists an edge here
-    if (this->data[vert + (vcount * i)])
-      ret.push_back(i);
+  for (unsigned i = row_start; i < row_end; i++) {
+      ret.push_back(this->column_index[i]);
   }
 
   return ret;
@@ -103,7 +110,6 @@ std::vector<int> Graph::get_edges_distributed(const int vert) const {
 
 // Perform a BFS from the specified source vertex and return the Parent Array
 std::vector<int> Graph::top_down_bfs(const int src) {
-    bfs_start_time = clock_now();
 
   // queue for storing future nodes to explore
   std::queue<int> q;
@@ -130,7 +136,6 @@ std::vector<int> Graph::top_down_bfs(const int src) {
     }
   }
 
-  bfs_end_time = clock_now();
   return parents;
 }
 
@@ -204,10 +209,8 @@ void Graph::broadcast_to_row(
   // Prepare receive counts and displacements (to be gathered via MPI_Alltoall)
   std::vector<int> recv_counts(this->info.width);
 
-  uint64_t comm_start = clock_now();
   MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT,
                info.row_comm);
-  bfs_comm_time += clock_now() - comm_start;
 
   std::vector<int> rdispls(this->info.width);
   int total_recv_size = 0;
@@ -219,11 +222,9 @@ void Graph::broadcast_to_row(
   std::vector<int> recv_buffer(total_recv_size);
 
   // Execute the MPI_Alltoallv
-  comm_start = clock_now();
   MPI_Alltoallv(total_send_buffer.data(), send_counts.data(), sdispls.data(),
                 MPI_INT, recv_buffer.data(), recv_counts.data(), rdispls.data(),
                 MPI_INT, info.row_comm);
-  bfs_comm_time += clock_now() - comm_start;
 
   // Deserialize recv_data back into a usable format, e.g., updating
   // candidate_parents or similar structures
@@ -242,10 +243,8 @@ bool Graph::gather_global_frontier(const std::vector<int> local_frontier,
   std::vector<int> all_local_sizes(this->info.width);
   int global_frontier_size, local_frontier_size = local_frontier.size();
 
-  uint64_t comm_start = clock_now();
   MPI_Allreduce(&local_frontier_size, &global_frontier_size, 1, MPI_INT,
                 MPI_SUM, MPI_COMM_WORLD);
-  bfs_comm_time += clock_now() - comm_start;
 
   if (global_frontier_size == 0) {
     return true;
@@ -253,10 +252,8 @@ bool Graph::gather_global_frontier(const std::vector<int> local_frontier,
 
   // Gather the sizes of the local frontiers from all processors in the same
   // column
-  comm_start = clock_now();
   MPI_Allgather(&local_frontier_size, 1, MPI_INT, all_local_sizes.data(), 1,
                 MPI_INT, this->info.col_comm);
-  bfs_comm_time += clock_now() - comm_start;
 
   std::vector<int> displacements(this->info.width);
   int sum = 0;
@@ -271,11 +268,9 @@ bool Graph::gather_global_frontier(const std::vector<int> local_frontier,
     global_frontier.resize(sum);
 
     // Perform the allgatherv operation
-    comm_start = clock_now();
     MPI_Allgatherv(local_frontier.data(), local_frontier_size, MPI_INT,
                    global_frontier.data(), all_local_sizes.data(),
                    displacements.data(), MPI_INT, this->info.col_comm);
-    bfs_comm_time += clock_now() - comm_start;
 
   }
   return false;
@@ -296,14 +291,12 @@ std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, 
 
   int iteration = 1;
   while (true) {
-    bfs_start_time = clock_now();
 
     // gather global frontier returns true when we are done
     if(this->gather_global_frontier(local_frontier, global_frontier))
       break;
 
     // if our frontier is not empty then inspect adjacent vertices
-    uint64_t comp_start = clock_now();
     for (int U : global_frontier) {
       // only check adj. if U might have an edge in our space
       if (this->in_column(U) && parents[U - columns.first] != -1) {
@@ -319,13 +312,11 @@ std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, 
         }
       }
     }
-    bfs_comp_time += clock_now() - comp_start;
 
     // Alltoallv
     this->broadcast_to_row(candidate_parents);
     local_frontier.clear();
 
-    comp_start = clock_now();
     for (auto item : candidate_parents) {
       auto vertex = item.first;
       auto parent = item.second;
@@ -342,16 +333,13 @@ std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, 
         }
       }
     }
-    bfs_comp_time += clock_now() - comp_start;
 
     candidate_parents.clear();
     global_frontier.clear();
 
     // checkpointing 
     if (checkpoint_int != 0 && iteration % checkpoint_int == 0) {
-      uint64_t io_start =clock_now();
       checkpoint_data(parents, iteration, this->info.col_comm, fname.data());
-      bfs_io_time += clock_now() - io_start;
     }
 
     iteration++;
@@ -360,7 +348,6 @@ std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, 
   if(info.rank == 0)
     std::cout << iteration << "iterations!\n";
 
-  bfs_end_time = clock_now();
   return parents;
 }
 
@@ -399,8 +386,6 @@ std::vector<int> Graph::parallel_top_down_bfs(const int src, int checkpoint_int)
     local_frontier.push_back(src);
   }
 
-  bfs_comm_time = 0;
-  bfs_io_time = 0;
   return this->parallel_top_down_bfs_driver(parents, local_frontier, checkpoint_int);
 }
 
@@ -414,24 +399,9 @@ void Graph::print_graph() const {
   std::cout << std::endl;
 }
 
-double cycles_to_secs(uint64_t cycles) {
-  return (double)(cycles / 512000000.0);
-}
-
-void Graph::print_timings() const {
-  std::cout << "Graph Initialization Time: " << cycles_to_secs(init_end_time - init_start_time) << " seconds \n";
-  std::cout << "Total BFS time: " << cycles_to_secs(bfs_end_time - bfs_start_time) << " seconds \n";
-  std::cout << "Computation time: " << cycles_to_secs(bfs_comp_time )<< " seconds\n";
-  std::cout << "Communication time: " << cycles_to_secs(bfs_comm_time )<< " seconds\n";
-  std::cout << "MPI I/O time: " << cycles_to_secs(bfs_io_time )<< " seconds\n";
-}
-
-
-
 // test CUDA function
 void Graph::from_kronecker_cuda(int scale, int edgefactor,
                                  unsigned long seed) {
-  uint64_t cuda_init_start = clock_now();
   int num_vertices = 1 << scale;
   // auto edge_list = generate_kronecker_list_cuda(scale, edgefactor, seed);
   auto edge_list = generate_kronecker_list_cuda(scale, edgefactor, seed);
@@ -445,12 +415,8 @@ void Graph::from_kronecker_cuda(int scale, int edgefactor,
     target[i] = std::make_pair(start[i], end[i]);
 
   Graph result(target, num_vertices);
-  uint64_t cuda_init_end = clock_now();
 
   *this = result;
-
-  this->init_start_time = cuda_init_start;
-  this->init_end_time = cuda_init_end;
 
   return;
 }
@@ -493,20 +459,6 @@ std::vector<std::vector<int>> generate_kronecker_list(int scale, int edgefactor,
 
   std::shuffle(edge_list[0].begin(), edge_list[0].end(), gen);
   std::shuffle(edge_list[1].begin(), edge_list[1].end(), gen);
-
-  // std::cout << "Start Vertex: ";
-  // for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
-  //      ++i) { // Output first 10 edges for preview
-  //   std::cout << edge_list[0][i] << ", ";
-  // }
-  // std::cout << "\n";
-
-  // std::cout << "End Vertex:   ";
-  // for (int i = 0; i < (num_edges < 10 ? num_edges : 10);
-  //      ++i) { // Output first 10 edges for preview
-  //   std::cout << edge_list[1][i] << ", ";
-  // }
-  // std::cout << "\n" << std::endl;
 
   return edge_list;
 }

@@ -1,7 +1,0 @@
-Rank 0: Total Time 0.00404739
-Graph Initialization Time: 0.00311034 seconds 
-Total BFS time: 0.000120152 seconds 
-Computation time: 0 seconds
-Communication time: 0 seconds
-MPI I/O time: 0 seconds
-

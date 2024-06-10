@@ -3,7 +3,7 @@ include_directories(${CUDA_INCLUDE_DIRS})
 
 add_executable(graph500 main.cpp)
 
-add_library(graphlib graph.h graph.cpp kernel.cu util.h util.cpp clockcycle.h)
+add_library(graphlib graph.h graph.cpp kernel.cu util.h util.cpp)
 
 set_target_properties(graphlib PROPERTIES CUDA_ARCHITECTURES "60;70")
 

@@ -15,7 +15,7 @@ class Graph {
 
   public:
   // Initialize to create an empty graph with no vertices.}
-  Graph() : vcount(0), data(), info(), columns(), rows(), output(false), bfs_comm_time(0) , bfs_comp_time(0), bfs_io_time(0) {}
+  Graph() : vcount(0), data(), info(), columns(), rows(), output(false) {}
   
   // constructor creates adj. mat. with vcount^2 elements in data vector
   Graph(size_t vcount);
@@ -27,13 +27,10 @@ class Graph {
   void from_kronecker_cuda(int scale, int edgefactor, unsigned long seed);
 
   // add an edge between two vertices
-  void add_edge(const int v1, const int v2);
+  // void add_edge(const int v1, const int v2);
 
   // get the list of vertices vertex is connected to (local indexing)
   std::vector<int> get_edges(const int vert) const;
-
-  // use global indexing
-  std::vector<int> get_edges_distributed(const int vert) const;
 
   // Perform a Top Down BFS from the specified source vertex and return the Parent Array
   std::vector<int> top_down_bfs(const int src);
@@ -57,12 +54,12 @@ class Graph {
   // print adj. mat. 
   void print_graph() const;
   void toggle_output() { output = true; }
-  void print_timings() const;
 
+  // CSR 
+  std::vector<int> data;
+  std::vector<unsigned> row_index;
+  std::vector<unsigned> column_index;
 
-  private:
-  // Bitfield Adjacency Matrix
-  std::vector<bool> data;
   // number of vertices
   size_t vcount;
   // info on MPI Processes/Topology
@@ -72,17 +69,6 @@ class Graph {
   std::pair<int, int> columns;
   std::pair<int, int> rows;
   bool output;
-
-  
-  uint64_t init_start_time;
-  uint64_t init_end_time;
-
-  uint64_t bfs_start_time;
-  uint64_t bfs_end_time;
-
-  uint64_t bfs_comm_time;
-  uint64_t bfs_comp_time;
-  uint64_t bfs_io_time;
 };
 
 
