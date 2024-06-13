@@ -1,14 +1,15 @@
 #include "graph.h"
 
+#include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <iostream>
+#include <iterator>
+#include <map>
 #include <mpi.h>
 #include <queue>
-#include <unordered_map>
-#include <unordered_set>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 
 // cuda kernels
 int cudaInit(int rank);
@@ -21,13 +22,39 @@ Graph::Graph(size_t vcount) : Graph() {
   this->data.resize(vcount * vcount, 0);
 }
 
+Graph::Graph(const std::vector<std::pair<int, int>> edge_list) : Graph() {
+  std::map<int, std::vector<unsigned>> adj_list;
+  ecount = edge_list.size();
+
+  for (auto pair : edge_list) {
+    adj_list[pair.first].push_back((unsigned)pair.second);
+    adj_list[pair.second].push_back((unsigned)pair.first);
+  }
+
+  vcount = adj_list.size();
+
+  int nnz = 0;
+  row_index.push_back(nnz);
+
+  for (auto entry : adj_list) {
+    std::sort(entry.second.begin(), entry.second.end());
+
+    data.insert(data.end(), entry.second.size(), 1);
+    column_index.insert(column_index.end(), std::begin(entry.second),
+                        std::end(entry.second));
+    nnz += entry.second.size();
+    row_index.push_back(nnz);
+  }
+}
+
 // construct a graph from an edge list
 Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
              const size_t vcount)
     : Graph() {
 
-    this->vcount = vcount;
-    std::vector<int> adj_mat(vcount * vcount, 0);
+  this->ecount = edge_list.size();
+  this->vcount = vcount;
+  std::vector<bool> adj_mat(vcount * vcount, 0);
 
   // loop over every edge pair and add it to the graph
   for (auto pair : edge_list) {
@@ -39,16 +66,16 @@ Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
     adj_mat[pair.second * this->vcount + pair.first] = true;
   }
 
-  //sparsify
+  // sparsify
   int nnz = 0;
   this->row_index.push_back(nnz);
 
   for (unsigned i = 0; i < vcount; i++) {
     for (unsigned j = 0; j < vcount; j++) {
       int entry = adj_mat[i * vcount + j];
-      if(entry != 0) {
-        this->data.push_back(entry);
-        this->column_index.push_back(j);
+      if (entry != 0) {
+        data.push_back(entry);
+        column_index.push_back(j);
         nnz += 1;
       }
     }
@@ -80,7 +107,6 @@ void Graph::from_kronecker(int scale, int edgefactor, unsigned long seed) {
 
   Graph result(target, n_vertices);
 
-
   *this = result;
 
   return;
@@ -94,7 +120,7 @@ void Graph::from_kronecker(int scale, int edgefactor, unsigned long seed) {
 // }
 
 // get the list of vertices vert is connected to
-std::vector<int> Graph::get_edges(const int vert) const {
+std::vector<int> Graph::neighbors(const int vert) const {
   std::vector<int> ret;
 
   unsigned row_start = this->row_index[vert];
@@ -102,7 +128,7 @@ std::vector<int> Graph::get_edges(const int vert) const {
 
   // loop over every vertex and push back those vert is adjacent to
   for (unsigned i = row_start; i < row_end; i++) {
-      ret.push_back(this->column_index[i]);
+    ret.push_back(this->column_index[i]);
   }
 
   return ret;
@@ -125,7 +151,7 @@ std::vector<int> Graph::top_down_bfs(const int src) {
     q.pop();
 
     // get list of adjacent vertices
-    auto connections = this->get_edges(parent);
+    auto connections = neighbors(parent);
     for (int v : connections) {
       // we only proceed when v has not been visited which is when it is NOT in
       // our set
@@ -158,7 +184,7 @@ std::vector<int> Graph::btm_down_bfs(const int src) const {
     for (int u = 0; u < this->vcount; u++) {
       // the vertex has no parent yet
       if (parents[u] == -1) {
-        auto edges = this->get_edges(u);
+        auto edges = neighbors(u);
         for (int v : edges) {
           if (frontier.find(v) != frontier.end()) {
             next.insert(u);
@@ -178,8 +204,7 @@ std::vector<int> Graph::btm_down_bfs(const int src) const {
 
 // given a local list of candidate parents, communicate with all processors in
 // this row to exhange and merge all candiate parents lists together
-void Graph::broadcast_to_row(
-    std::unordered_map<int, int> &candidate_parents) {
+void Graph::broadcast_to_row(std::unordered_map<int, int> &candidate_parents) {
 
   std::vector<std::vector<int>> send_buffers(this->info.width);
 
@@ -271,15 +296,17 @@ bool Graph::gather_global_frontier(const std::vector<int> local_frontier,
     MPI_Allgatherv(local_frontier.data(), local_frontier_size, MPI_INT,
                    global_frontier.data(), all_local_sizes.data(),
                    displacements.data(), MPI_INT, this->info.col_comm);
-
   }
   return false;
 }
 
 // given a parents list and local frontier, start BFS
-std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, std::vector<int> &local_frontier, int checkpoint_int) {
- 
-  std::stringstream s;  
+std::vector<int>
+Graph::parallel_top_down_bfs_driver(std::vector<int> &parents,
+                                    std::vector<int> &local_frontier,
+                                    int checkpoint_int) {
+
+  std::stringstream s;
   s << "checkpoint" << info.i << ".bin";
   std::string fname = s.str();
 
@@ -293,7 +320,7 @@ std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, 
   while (true) {
 
     // gather global frontier returns true when we are done
-    if(this->gather_global_frontier(local_frontier, global_frontier))
+    if (this->gather_global_frontier(local_frontier, global_frontier))
       break;
 
     // if our frontier is not empty then inspect adjacent vertices
@@ -301,7 +328,7 @@ std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, 
       // only check adj. if U might have an edge in our space
       if (this->in_column(U) && parents[U - columns.first] != -1) {
         // shift the value of U to match local indexing
-        auto connections = this->get_edges(U - columns.first);
+        auto connections = neighbors(U - columns.first);
         // look through all connections and find any that need exploring
         for (auto v : connections) {
           // V is global index
@@ -337,7 +364,7 @@ std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, 
     candidate_parents.clear();
     global_frontier.clear();
 
-    // checkpointing 
+    // checkpointing
     if (checkpoint_int != 0 && iteration % checkpoint_int == 0) {
       checkpoint_data(parents, iteration, this->info.col_comm, fname.data());
     }
@@ -345,40 +372,44 @@ std::vector<int> Graph::parallel_top_down_bfs_driver(std::vector<int> &parents, 
     iteration++;
   }
 
-  if(info.rank == 0)
+  if (info.rank == 0)
     std::cout << iteration << "iterations!\n";
 
   return parents;
 }
 
 // write parents list to file
-void Graph::checkpoint_data(const std::vector<int>& data, const int iteration, MPI_Comm comm, const char* filename) const {
-    MPI_File fh;
-    MPI_Status status;
+void Graph::checkpoint_data(const std::vector<int> &data, const int iteration,
+                            MPI_Comm comm, const char *filename) const {
+  MPI_File fh;
+  MPI_Status status;
 
-    // Open the file for writing
-    MPI_File_open(comm, filename, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
+  // Open the file for writing
+  MPI_File_open(comm, filename, MPI_MODE_CREATE | MPI_MODE_WRONLY,
+                MPI_INFO_NULL, &fh);
 
-    // Calculate the offset for each process
-    MPI_Offset offset = info.rank * sizeof(int) * data.size();
+  // Calculate the offset for each process
+  MPI_Offset offset = info.rank * sizeof(int) * data.size();
 
-    // Write the data
-    MPI_File_write_at(fh, offset, data.data(), data.size(), MPI_INT, &status);
+  // Write the data
+  MPI_File_write_at(fh, offset, data.data(), data.size(), MPI_INT, &status);
 
-    // Close the file
-    MPI_File_close(&fh);
-    
-    if (info.rank == 0 && output) {
-        std::cout << "Checkpoint at iteration " << iteration << " written successfully.\n";
-    }
+  // Close the file
+  MPI_File_close(&fh);
+
+  if (info.rank == 0 && output) {
+    std::cout << "Checkpoint at iteration " << iteration
+              << " written successfully.\n";
+  }
 }
 
 // Perform a Parallel Top Down BFS from the specified source vertex and return
 // the Parent Array
-std::vector<int> Graph::parallel_top_down_bfs(const int src, int checkpoint_int) {
+std::vector<int> Graph::parallel_top_down_bfs(const int src,
+                                              int checkpoint_int) {
   std::vector<int> parents(this->vcount, -1);
   // candidate_parents[src] = src;
-  std::vector<int> local_frontier ;
+  std::vector<int> local_frontier;
 
   // only add src to frontier if it is owned by the current graph object
   if (this->in_column(src)) {
@@ -386,13 +417,23 @@ std::vector<int> Graph::parallel_top_down_bfs(const int src, int checkpoint_int)
     local_frontier.push_back(src);
   }
 
-  return this->parallel_top_down_bfs_driver(parents, local_frontier, checkpoint_int);
+  return this->parallel_top_down_bfs_driver(parents, local_frontier,
+                                            checkpoint_int);
 }
 
 void Graph::print_graph() const {
   for (unsigned i = 0; i < this->vcount; i++) {
+    auto edges = neighbors(i);
+    auto edges_iter = edges.begin();
+
     for (unsigned j = 0; j < this->vcount; j++) {
-      std::cout << this->data[this->vcount * i + j] << " ";
+      if (edges_iter != edges.end() && *edges_iter == j) {
+        std::cout << 1;
+        edges_iter++;
+      } else
+        std::cout << "0";
+
+      std::cout << " ";
     }
     std::cout << "\n";
   }
@@ -400,8 +441,7 @@ void Graph::print_graph() const {
 }
 
 // test CUDA function
-void Graph::from_kronecker_cuda(int scale, int edgefactor,
-                                 unsigned long seed) {
+void Graph::from_kronecker_cuda(int scale, int edgefactor, unsigned long seed) {
   int num_vertices = 1 << scale;
   // auto edge_list = generate_kronecker_list_cuda(scale, edgefactor, seed);
   auto edge_list = generate_kronecker_list_cuda(scale, edgefactor, seed);
@@ -496,9 +536,24 @@ generate_kronecker_list_cuda(int scale, int edgefactor,
   std::shuffle(edge_list[0].begin(), edge_list[0].end(), gen);
   std::shuffle(edge_list[1].begin(), edge_list[1].end(), gen);
 
-
   return edge_list;
 }
 
+// Return the sum of the edge weights (the number of edges for unweighted graph)
+int Graph::degree(int v) const {
+  return this->row_index[v + 1] - this->row_index[v];
+}
 
+int Graph::get_edge(int v1, int v2) const {
+  unsigned row_start = this->row_index[v1];
+  unsigned row_end = this->row_index[v1 + 1];
 
+  for (unsigned i = row_start; i < row_end; i++) {
+    if (this->column_index[i] == v2)
+      return column_index[i];
+    else if (this->column_index[i] > v2)
+      break;
+  }
+
+  return 0;
+}

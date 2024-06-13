@@ -1,3 +1,7 @@
+# text input
+graph.txt
+graph-small.txt
+
 # helix ignore file
 .ignore
 #sync script
