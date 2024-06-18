@@ -1,5 +1,11 @@
 #include "util.h"
+#include <alloca.h>
+#include <cstdlib>
 #include <mpi.h>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <sstream>
 
 ProcInfo::ProcInfo() {
 
@@ -42,15 +48,57 @@ ProcInfo::ProcInfo() {
     col_ranks[w] = this->i + (w * width);
   }
 
-  MPI_Group world_group, row_group, col_group;
   MPI_Comm_group(MPI_COMM_WORLD, &world_group);
 
   MPI_Group_incl(world_group, width, row_ranks, &row_group);
   MPI_Group_incl(world_group, width, col_ranks, &col_group);
 
-  MPI_Comm_create(MPI_COMM_WORLD, row_group, &this->row_comm);
-  MPI_Comm_create(MPI_COMM_WORLD, col_group, &this->col_comm);
+  MPI_Comm_create_group(MPI_COMM_WORLD, row_group, 0, &row_comm);
+  MPI_Comm_create_group(MPI_COMM_WORLD, col_group, 0,  &col_comm);
 
-  MPI_Comm_rank(this->row_comm, &this->row_rank);
-  MPI_Comm_rank(this->col_comm, &this->col_rank);
+  MPI_Comm_rank(row_comm, &row_rank);
+  MPI_Comm_rank(col_comm, &col_rank);
+}
+
+ProcInfo::~ProcInfo() {
+  int initialized;
+  MPI_Initialized(&initialized);
+
+  // only compute MPI values if MPI process is active
+  if(!initialized) 
+    return;
+
+  // MPI_Group_free(&world_group);
+  MPI_Group_free(&row_group);
+  MPI_Group_free(&col_group);
+
+  MPI_Comm_free(&row_comm);
+  MPI_Comm_free(&col_comm);
+}
+
+
+std::vector<std::pair<int, int>> edge_list_from_file(const std::string& fname) {
+    std::cout << "Here!" << std::endl;
+    std::ifstream file(fname);
+    if (!file.is_open()) {
+        std::cerr << "Error opening file: " << fname << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    std::vector<std::pair<int, int>> edges;  // Vector to store the edges
+    std::string line;
+
+    while (getline(file, line)) {
+        std::istringstream iss(line);
+        int u, v;
+        if (iss >> u >> v) {  // Read two integers from the line
+            edges.push_back({u, v});  // Add the edge to the vector
+        } else {
+            std::cerr << "Error reading line: " << line << std::endl;
+        }
+    }
+    file.close();  // Close the file
+
+
+    return edges;
 }

@@ -25,6 +25,8 @@ class Graph {
   // creates a graph from just an edge list
   Graph(const std::vector<std::pair<int,int>> edge_list);
 
+  Graph(const std::string& fname, bool distributed);
+
   // generate a graph using kronecker algorithm
   void from_kronecker(int scale, int edgefactor, unsigned long seed);
   void from_kronecker_cuda(int scale, int edgefactor, unsigned long seed);
@@ -59,6 +61,10 @@ class Graph {
   bool in_column(int v) const { return v >= this->columns.first && v <= this->columns.second; }
   bool in_row(int v) const { return (v >= this->rows.first && v <= this->rows.second); }
   bool contains(int v) const { return this->in_column(v) || this->in_row(v); }
+
+  // int getRowOwner(int v) const { return (v / vcount) * info.width; }
+  // int getColOwner(int v) const { return v / vcount; }
+  int makeLocal(int v) const { return v % vcount; }
 
   // print adj. mat. 
   void print_graph() const;

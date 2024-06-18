@@ -1,5 +1,7 @@
 #include "graph.h"
+#include "community.h"
 #include <cstddef>
+#include <cstdlib>
 #include <gtest/gtest.h>
 #include <iostream>
 #include <utility>
@@ -81,7 +83,20 @@ TEST(CommunityDetection, Small) {
       {9, 12}, {9, 14}, {10, 11}, {10, 12}, {10, 13}, {10, 14}, {11, 13},
   };
 
-  
+  Graph g(edges);
+  Communities c(g);
+
+  double eps = 0.000001;
+
+  ASSERT_TRUE(std::abs(c.modularity() - -0.0714286) < eps);
+
+  ASSERT_TRUE(c.iterate());
+
+  ASSERT_TRUE(std::abs(c.modularity() - 0.346301) < eps);
+
+  Graph g2 = c.into_new_graph();
+
+  ASSERT_EQ(g2.vcount, 4);
 }
 
 int main(int argc, char *argv[]) {

@@ -19,11 +19,14 @@ struct Communities {
   
   void insert(int node, int community, int node_comm_degree);
   void remove(int node, int community, int node_comm_degree);
+  int compute_best_community(int node, int node_comm);
   void compute_neighbors(int node);
   double modularity_gain(int node, int comm, double node_comm_degree);
   bool iterate();
 
   double modularity();
+
+  Graph into_new_graph();
 
   Graph& g;
 };

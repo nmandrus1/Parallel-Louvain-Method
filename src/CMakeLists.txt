@@ -1,7 +1,8 @@
 include_directories(${MPI_INCLUDE_PATH})
 include_directories(${CUDA_INCLUDE_DIRS})
 
-add_executable(graph500 main.cpp)
+# add_executable(graph500 main.cpp)
+add_executable(graph500 main_distributed_community.cpp)
 
 add_library(graphlib graph.h graph.cpp kernel.cu util.h util.cpp community.h community.cpp)
 
