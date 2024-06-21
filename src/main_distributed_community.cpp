@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <mpi.h>
+#include "community.h"
 #include "graph.h"
 #include <string>
 
@@ -44,20 +45,18 @@ int run(int rank, int comm_size, Args args) {
   }
 
   Graph g(dir.string(), true);
-  for(int i = 0; i < comm_size; i++) {
-    if(rank == i){
-      std::cout << "Rank " << i << std::endl;
-      g.print_graph();
-    }
+  DistCommunities comm(g);
 
-    MPI_Barrier(MPI_COMM_WORLD);
+  if(rank == 0) {
+    std::string f("./data/graph/graph.txt");
+    Graph g2(f, false);
+    g2.print_graph();
+
+    std::cout << "\n\n";
+   for(int v = 0; v < g2.vcount; v++) 
+     std::cout << "Degree of vtx " << v << ": " << g2.degree(v) << std::endl;
   }
 
-  // if(rank == 0) {
-  //   std::string f("./data/graph/graph.txt");
-  //   Graph g2(f, false);
-  //   g2.print_graph();
-  // }
 
   return 0;
 }

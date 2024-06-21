@@ -87,99 +87,105 @@ Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
     this->row_index.push_back(nnz);
   }
 
-  this->rows.first = vcount * this->info.j;
+  this->rows.first = vcount * info->grid_row;
   this->rows.second = this->rows.first + vcount - 1;
 
-  this->columns.first = vcount * this->info.i;
+  this->columns.first = vcount * info->grid_col;
   this->columns.second = this->columns.first + vcount - 1;
 }
 
-Graph::Graph(const std::string& fname, bool distributed) : Graph(){
+Graph::Graph(const std::string &fname, bool distributed) : Graph() {
   auto edges = edge_list_from_file(fname);
 
-  if(distributed == false) {
+  if (distributed == false) {
     *this = Graph(edges);
     return;
   }
 
-  // if this is a distributed graph, we need to calculate which edges belong where 
-  // For now we assume that all edges are numbered 0 to n with no gaps
-  // map ranks to the edges that need to go to that rank
+  // if this is a distributed graph, we need to calculate which edges belong
+  // where For now we assume that all edges are numbered 0 to n with no gaps map
+  // ranks to the edges that need to go to that rank
 
   int max_vtx = 0;
-  for(auto edge: edges)
+  for (auto edge : edges)
     max_vtx = std::max(std::max(max_vtx, edge.first), edge.second);
 
-  // send and recv the maximum vertex number, this + 1 is the total number of vertices in the graph
-  // and we can use this information to help us partition the graph 
+  // send and recv the maximum vertex number, this + 1 is the total number of
+  // vertices in the graph and we can use this information to help us partition
+  // the graph
   MPI_Allreduce(&max_vtx, &max_vtx, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
   // we have a vcount x vcount adj matrix locally
-  // globally, info.width is the width of the process grid
-  // so with 4 mpi procs info.width = 2 and the total number of 
+  // globally, info->width is the width of the process grid
+  // so with 4 mpi procs info->width = 2 and the total number of
   // vertices is (max_vtx + 1) / 2 = 16/2 -> 8
-  vcount = (max_vtx + 1)/info.width;
+  vcount = (max_vtx + 1) / info->width;
 
   std::unordered_map<int, std::vector<int>> msg_map;
-  for(auto edge: edges) {
-    auto v1 = edge.first;    
-    auto v2 = edge.second;    
+  for (auto edge : edges) {
+    auto v1 = edge.first;
+    auto v2 = edge.second;
 
     auto v1_cord = v1 / vcount;
     auto v2_cord = v2 / vcount;
 
-    int rank1 = (info.width * v1_cord) + v2_cord;
-    int rank2 = (info.width * v2_cord) + v1_cord;
+    int rank1 = (info->width * v1_cord) + v2_cord;
+    int rank2 = (info->width * v2_cord) + v1_cord;
 
     msg_map[rank1].push_back(v1);
     msg_map[rank1].push_back(v2);
 
     msg_map[rank2].push_back(v2);
     msg_map[rank2].push_back(v1);
-
   }
 
-  // store the length, in number of integers, that this proc is sending to each rank
+  // store the length, in number of integers, that this proc is sending to each
+  // rank
   int total_ints_to_send = 0;
-  std::vector<int> send_buf(info.comm_size, 0);
-  for(auto entry: msg_map) {
+  std::vector<int> send_buf(info->comm_size, 0);
+  for (auto entry : msg_map) {
     send_buf[entry.first] = entry.second.size();
     total_ints_to_send += entry.second.size();
   }
 
   // send 1 int to each proc
-  std::vector<int> counts_send(info.comm_size, 1);
+  std::vector<int> counts_send(info->comm_size, 1);
 
   // displacement for each proc is its own rank
-  std::vector<int> displs_send(info.comm_size);
-  for(int i = 0; i < info.comm_size; i++)
+  std::vector<int> displs_send(info->comm_size);
+  for (int i = 0; i < info->comm_size; i++)
     displs_send[i] = i;
 
-  std::vector<int> recv_buf(info.comm_size);
+  std::vector<int> recv_buf(info->comm_size);
   // counts_recv is the same as counts_send
   // displ_recv is the same as displ_send
-  MPI_Alltoallv(send_buf.data(), counts_send.data(), displs_send.data(), MPI_INT, 
-                recv_buf.data(), counts_send.data(), displs_send.data(), MPI_INT, MPI_COMM_WORLD);
+  MPI_Request req;
+  MPI_Ialltoallv(send_buf.data(), counts_send.data(), displs_send.data(),
+                 MPI_INT, recv_buf.data(), counts_send.data(),
+                 displs_send.data(), MPI_INT, MPI_COMM_WORLD, &req);
+  MPI_Wait(&req, MPI_STATUS_IGNORE);
 
   send_buf.resize(total_ints_to_send);
   send_buf.clear();
+  std::fill(counts_send.begin(), counts_send.end(), 0);
 
   int send_displ = 0;
-  for(int rank = 0; rank < info.comm_size; rank++) {
+  for (int rank = 0; rank < info->comm_size; rank++) {
     auto entry = msg_map.find(rank);
-    if(entry == msg_map.end()) continue;
+    if (entry == msg_map.end())
+      continue;
 
     auto msg = entry->second;
     send_buf.insert(send_buf.end(), msg.begin(), msg.end());
     counts_send[rank] = msg.size();
 
-    // calculate offset from start 
+    // calculate offset from start
     displs_send[rank] = send_displ;
     send_displ += msg.size();
   }
 
   int total_ints_to_recv = 0;
-  std::vector<int> recv_counts(info.comm_size), recv_displ(info.comm_size);
-  for(int rank = 0; rank < info.comm_size; rank++) {
+  std::vector<int> recv_counts(info->comm_size), recv_displ(info->comm_size);
+  for (int rank = 0; rank < info->comm_size; rank++) {
     recv_counts[rank] = recv_buf[rank];
 
     recv_displ[rank] = total_ints_to_recv;
@@ -189,11 +195,13 @@ Graph::Graph(const std::string& fname, bool distributed) : Graph(){
   // resize recv buffer
   recv_buf.resize(total_ints_to_recv);
 
-  MPI_Alltoallv(send_buf.data(), counts_send.data(), displs_send.data(), MPI_INT, 
-                recv_buf.data(), recv_counts.data(), recv_displ.data(), MPI_INT, MPI_COMM_WORLD);
+  MPI_Request req2;
+  MPI_Ialltoallv(send_buf.data(), counts_send.data(), displs_send.data(),
+                 MPI_INT, recv_buf.data(), recv_counts.data(),
+                 recv_displ.data(), MPI_INT, MPI_COMM_WORLD, &req2);
+  MPI_Wait(&req2, MPI_STATUS_IGNORE);
 
-  
-  edges.resize(total_ints_to_recv/2);
+  edges.resize(total_ints_to_recv / 2);
   edges.clear();
 
   // Deserialize recv_data back into a usable format, e.g., updating
@@ -204,9 +212,41 @@ Graph::Graph(const std::string& fname, bool distributed) : Graph(){
     edges.push_back(std::make_pair(makeLocal(vertex), makeLocal(parent)));
   }
 
-  *this = Graph(edges, vcount);
-}
+  this->ecount = edges.size();
+  std::vector<bool> adj_mat(vcount * vcount, 0);
 
+  // loop over every edge pair and add it to the graph
+  for (auto pair : edges) {
+    if (pair.first == pair.second)
+      continue;
+
+    // 1-d indexing
+    adj_mat[pair.first * this->vcount + pair.second] = true;
+  }
+
+  // sparsify
+  int nnz = 0;
+  row_index.push_back(nnz);
+
+  for (unsigned i = 0; i < vcount; i++) {
+    for (unsigned j = 0; j < vcount; j++) {
+      int entry = adj_mat[i * vcount + j];
+      if (entry != 0) {
+        data.push_back(entry);
+        column_index.push_back(j);
+        nnz += 1;
+      }
+    }
+
+    row_index.push_back(nnz);
+  }
+
+  rows.first = vcount * info->grid_row;
+  rows.second = rows.first + vcount - 1;
+
+  columns.first = vcount * info->grid_col;
+  columns.second = columns.first + vcount - 1;
+}
 
 // generate a graph using kronecker algorithm
 void Graph::from_kronecker(int scale, int edgefactor, unsigned long seed) {
@@ -324,7 +364,7 @@ std::vector<int> Graph::btm_down_bfs(const int src) const {
 // this row to exhange and merge all candiate parents lists together
 void Graph::broadcast_to_row(std::unordered_map<int, int> &candidate_parents) {
 
-  std::vector<std::vector<int>> send_buffers(this->info.width);
+  std::vector<std::vector<int>> send_buffers(this->info->width);
 
   // Organize data into send buffers for each process in the row
   for (const auto &pair : candidate_parents) {
@@ -337,12 +377,12 @@ void Graph::broadcast_to_row(std::unordered_map<int, int> &candidate_parents) {
   }
 
   // Prepare for MPI_Alltoallv
-  std::vector<int> send_counts(this->info.width, 0);
-  std::vector<int> sdispls(this->info.width, 0);
+  std::vector<int> send_counts(this->info->width, 0);
+  std::vector<int> sdispls(this->info->width, 0);
   std::vector<int> total_send_buffer;
 
   // Flatten send buffers and calculate send counts and displacements
-  for (int i = 0; i < this->info.width; ++i) {
+  for (int i = 0; i < this->info->width; ++i) {
     sdispls[i] = total_send_buffer.size();
     send_counts[i] = send_buffers[i].size();
     total_send_buffer.insert(total_send_buffer.end(), send_buffers[i].begin(),
@@ -350,14 +390,14 @@ void Graph::broadcast_to_row(std::unordered_map<int, int> &candidate_parents) {
   }
 
   // Prepare receive counts and displacements (to be gathered via MPI_Alltoall)
-  std::vector<int> recv_counts(this->info.width);
+  std::vector<int> recv_counts(this->info->width);
 
   MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT,
-               info.row_comm);
+               info->row_comm);
 
-  std::vector<int> rdispls(this->info.width);
+  std::vector<int> rdispls(this->info->width);
   int total_recv_size = 0;
-  for (int i = 0; i < this->info.width; ++i) {
+  for (int i = 0; i < this->info->width; ++i) {
     rdispls[i] = total_recv_size;
     total_recv_size += recv_counts[i];
   }
@@ -367,7 +407,7 @@ void Graph::broadcast_to_row(std::unordered_map<int, int> &candidate_parents) {
   // Execute the MPI_Alltoallv
   MPI_Alltoallv(total_send_buffer.data(), send_counts.data(), sdispls.data(),
                 MPI_INT, recv_buffer.data(), recv_counts.data(), rdispls.data(),
-                MPI_INT, info.row_comm);
+                MPI_INT, info->row_comm);
 
   // Deserialize recv_data back into a usable format, e.g., updating
   // candidate_parents or similar structures
@@ -383,7 +423,7 @@ void Graph::broadcast_to_row(std::unordered_map<int, int> &candidate_parents) {
 bool Graph::gather_global_frontier(const std::vector<int> local_frontier,
                                    std::vector<int> &global_frontier) {
 
-  std::vector<int> all_local_sizes(this->info.width);
+  std::vector<int> all_local_sizes(this->info->width);
   int global_frontier_size, local_frontier_size = local_frontier.size();
 
   MPI_Allreduce(&local_frontier_size, &global_frontier_size, 1, MPI_INT,
@@ -396,11 +436,11 @@ bool Graph::gather_global_frontier(const std::vector<int> local_frontier,
   // Gather the sizes of the local frontiers from all processors in the same
   // column
   MPI_Allgather(&local_frontier_size, 1, MPI_INT, all_local_sizes.data(), 1,
-                MPI_INT, this->info.col_comm);
+                MPI_INT, this->info->col_comm);
 
-  std::vector<int> displacements(this->info.width);
+  std::vector<int> displacements(this->info->width);
   int sum = 0;
-  for (int i = 0; i < this->info.width; ++i) {
+  for (int i = 0; i < this->info->width; ++i) {
     displacements[i] = sum;
     sum += all_local_sizes[i];
   }
@@ -413,7 +453,7 @@ bool Graph::gather_global_frontier(const std::vector<int> local_frontier,
     // Perform the allgatherv operation
     MPI_Allgatherv(local_frontier.data(), local_frontier_size, MPI_INT,
                    global_frontier.data(), all_local_sizes.data(),
-                   displacements.data(), MPI_INT, this->info.col_comm);
+                   displacements.data(), MPI_INT, this->info->col_comm);
   }
   return false;
 }
@@ -425,7 +465,7 @@ Graph::parallel_top_down_bfs_driver(std::vector<int> &parents,
                                     int checkpoint_int) {
 
   std::stringstream s;
-  s << "checkpoint" << info.i << ".bin";
+  s << "checkpoint" << info->grid_row << ".bin";
   std::string fname = s.str();
 
   std::unordered_map<int, int> candidate_parents;
@@ -484,13 +524,13 @@ Graph::parallel_top_down_bfs_driver(std::vector<int> &parents,
 
     // checkpointing
     if (checkpoint_int != 0 && iteration % checkpoint_int == 0) {
-      checkpoint_data(parents, iteration, this->info.col_comm, fname.data());
+      checkpoint_data(parents, iteration, this->info->col_comm, fname.data());
     }
 
     iteration++;
   }
 
-  if (info.rank == 0)
+  if (info->rank == 0)
     std::cout << iteration << "iterations!\n";
 
   return parents;
@@ -507,7 +547,7 @@ void Graph::checkpoint_data(const std::vector<int> &data, const int iteration,
                 MPI_INFO_NULL, &fh);
 
   // Calculate the offset for each process
-  MPI_Offset offset = info.rank * sizeof(int) * data.size();
+  MPI_Offset offset = info->rank * sizeof(int) * data.size();
 
   // Write the data
   MPI_File_write_at(fh, offset, data.data(), data.size(), MPI_INT, &status);
@@ -515,7 +555,7 @@ void Graph::checkpoint_data(const std::vector<int> &data, const int iteration,
   // Close the file
   MPI_File_close(&fh);
 
-  if (info.rank == 0 && output) {
+  if (info->rank == 0 && output) {
     std::cout << "Checkpoint at iteration " << iteration
               << " written successfully.\n";
   }

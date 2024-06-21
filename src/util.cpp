@@ -6,21 +6,24 @@
 #include <string>
 #include <vector>
 #include <sstream>
+#include <cassert>
+
+ProcInfo* ProcInfo::instance = nullptr;
 
 ProcInfo::ProcInfo() {
-
   int initialized;
   MPI_Initialized(&initialized);
 
   // only compute MPI values if MPI process is active
-  if(!initialized) 
-    return;
+  if(!initialized) {
+    std::cerr << "MPI not initialized, aborting...\n";
+    exit(EXIT_FAILURE);
+  }
 
-  int rank, comm_size;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
 
-  int width = sqrt(comm_size);
+  width = sqrt(comm_size);
 
   if(width * width != comm_size) {
     if(rank == 0)
@@ -30,31 +33,14 @@ ProcInfo::ProcInfo() {
   }
 
 
-  this->rank = rank;
-  this->i = rank % width;
-  this->j = std::floor(rank/width);
-  this->comm_size = comm_size;
-  this->width = width;
+  grid_row = std::floor(rank/width);
+  grid_col = rank % width;
 
-  // ranks for MPI Row and Column groups
-  int row_ranks[width];
-  int col_ranks[width];
+  MPI_Comm_split(MPI_COMM_WORLD, grid_row, rank, &row_comm);
+  MPI_Comm_split(MPI_COMM_WORLD, grid_col, rank, &col_comm);
 
-  for (int w =0; w < width; w++) {
-    // if you're process 4 in a 3x3 grid (middle grid) then 
-    // row ranks should be 3, 4, 5
-    // col ranks should be 1, 4, 7
-    row_ranks[w] = (this->j * width) + w;
-    col_ranks[w] = this->i + (w * width);
-  }
-
-  MPI_Comm_group(MPI_COMM_WORLD, &world_group);
-
-  MPI_Group_incl(world_group, width, row_ranks, &row_group);
-  MPI_Group_incl(world_group, width, col_ranks, &col_group);
-
-  MPI_Comm_create_group(MPI_COMM_WORLD, row_group, 0, &row_comm);
-  MPI_Comm_create_group(MPI_COMM_WORLD, col_group, 0,  &col_comm);
+  assert(row_comm != MPI_COMM_NULL);
+  assert(col_comm != MPI_COMM_NULL);
 
   MPI_Comm_rank(row_comm, &row_rank);
   MPI_Comm_rank(col_comm, &col_rank);
@@ -68,17 +54,12 @@ ProcInfo::~ProcInfo() {
   if(!initialized) 
     return;
 
-  // MPI_Group_free(&world_group);
-  MPI_Group_free(&row_group);
-  MPI_Group_free(&col_group);
-
   MPI_Comm_free(&row_comm);
   MPI_Comm_free(&col_comm);
 }
 
 
 std::vector<std::pair<int, int>> edge_list_from_file(const std::string& fname) {
-    std::cout << "Here!" << std::endl;
     std::ifstream file(fname);
     if (!file.is_open()) {
         std::cerr << "Error opening file: " << fname << std::endl;

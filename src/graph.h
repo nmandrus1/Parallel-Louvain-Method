@@ -8,6 +8,7 @@
 #include <vector>
 #include <random>
 #include <algorithm>
+#include <cassert>
 
 #include "util.h"
 
@@ -16,7 +17,7 @@ class Graph {
 
   public:
   // Initialize to create an empty graph with no vertices.}
-  Graph() : vcount(0), ecount(0), data(), info(), columns(), rows(), output(false) {}
+  Graph() : vcount(0), ecount(0), data(), info(ProcInfo::getInstance()), columns(), rows(), output(false) {}
   
   // constructor creates adj. mat. with vcount^2 elements in data vector
   Graph(size_t vcount);
@@ -65,6 +66,8 @@ class Graph {
   // int getRowOwner(int v) const { return (v / vcount) * info.width; }
   // int getColOwner(int v) const { return v / vcount; }
   int makeLocal(int v) const { return v % vcount; }
+  int localRowToGlobal(int v) const { assert(v < vcount); return v + (info->grid_row * vcount); }
+  int localColToGlobal(int v) const { assert(v < vcount); return v + (info->grid_col * vcount); }
 
   // print adj. mat. 
   void print_graph() const;
@@ -80,7 +83,7 @@ class Graph {
   // number of vertices
   size_t ecount;
   // info on MPI Processes/Topology
-  ProcInfo info;
+  const ProcInfo* info;
 
   // start and end (inclusive) ownership for rows and columns
   std::pair<int, int> columns;

@@ -9,15 +9,26 @@
 
 struct ProcInfo {
   // store rank, row, and column of adj matrix
-  int rank, row_rank,col_rank, comm_size, i, j, width; 
+  int rank, row_rank,col_rank, comm_size, grid_row, grid_col, width; 
   MPI_Comm row_comm, col_comm;
-  MPI_Group world_group, row_group, col_group;
+  
+  static ProcInfo* instance;
 
   ProcInfo();
   ~ProcInfo();
 
-  // calculate what rank owns a given vertex
-  int owner_of(int vertex);
+  
+  // Delete copy constructor and copy assignment operator
+  ProcInfo(const ProcInfo&) = delete;
+  ProcInfo& operator=(const ProcInfo&) = delete;
+
+  // Public static method to access the instance
+  static const ProcInfo* getInstance() {
+      if (instance == nullptr) {
+          instance = new ProcInfo();
+      }
+      return instance;
+  }
 };
 
 
