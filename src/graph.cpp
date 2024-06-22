@@ -88,7 +88,7 @@ Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
   }
 
   this->rows.first = vcount * info->grid_row;
-  this->rows.second = this->rows.first + vcount - 1;
+  this->rows.second = this->rows.first + vcount;
 
   this->columns.first = vcount * info->grid_col;
   this->columns.second = this->columns.first + vcount - 1;
@@ -114,11 +114,16 @@ Graph::Graph(const std::string &fname, bool distributed) : Graph() {
   // vertices in the graph and we can use this information to help us partition
   // the graph
   MPI_Allreduce(&max_vtx, &max_vtx, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+
   // we have a vcount x vcount adj matrix locally
   // globally, info->width is the width of the process grid
   // so with 4 mpi procs info->width = 2 and the total number of
   // vertices is (max_vtx + 1) / 2 = 16/2 -> 8
   vcount = (max_vtx + 1) / info->width;
+
+  int edge_count = edges.size();
+  MPI_Allreduce(&edge_count, &edge_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+  ecount = edge_count;
 
   std::unordered_map<int, std::vector<int>> msg_map;
   for (auto edge : edges) {
@@ -212,7 +217,7 @@ Graph::Graph(const std::string &fname, bool distributed) : Graph() {
     edges.push_back(std::make_pair(makeLocal(vertex), makeLocal(parent)));
   }
 
-  this->ecount = edges.size();
+  // this->ecount = edges.size();
   std::vector<bool> adj_mat(vcount * vcount, 0);
 
   // loop over every edge pair and add it to the graph
@@ -242,10 +247,10 @@ Graph::Graph(const std::string &fname, bool distributed) : Graph() {
   }
 
   rows.first = vcount * info->grid_row;
-  rows.second = rows.first + vcount - 1;
-
+  rows.second = rows.first + vcount;
+  
   columns.first = vcount * info->grid_col;
-  columns.second = columns.first + vcount - 1;
+  columns.second = columns.first + vcount;
 }
 
 // generate a graph using kronecker algorithm
@@ -292,6 +297,21 @@ std::vector<int> Graph::neighbors(const int vert) const {
   return ret;
 }
 
+// Assuming that vert is the global vertex index
+std::vector<int> Graph::neighborsGlobalIdxs(const int vert) const {
+  int local = vert % vcount;
+  std::vector<int> ret;
+
+  unsigned row_start = this->row_index[local];
+  unsigned row_end = this->row_index[local + 1];
+
+  // loop over every vertex and push back those vert is adjacent to
+  for (unsigned i = row_start; i < row_end; i++) {
+    ret.push_back(localColToGlobal(column_index[i]));
+  }
+
+  return ret;
+}
 // Perform a BFS from the specified source vertex and return the Parent Array
 std::vector<int> Graph::top_down_bfs(const int src) {
 

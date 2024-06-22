@@ -37,6 +37,8 @@ class Graph {
 
   // get the list of vertices vertex is connected to (local indexing)
   std::vector<int> neighbors(const int vert) const;
+  // get a list of vertices vert is connected to in the local graph (global indexing)
+  std::vector<int> neighborsGlobalIdxs(const int vert) const;
 
   // Perform a Top Down BFS from the specified source vertex and return the Parent Array
   std::vector<int> top_down_bfs(const int src);
@@ -52,9 +54,6 @@ class Graph {
   bool gather_global_frontier(const std::vector<int> local_frontier, std::vector<int>& global_frontier);
   void checkpoint_data(const std::vector<int>& data, const int iteration, MPI_Comm comm, const char* filename) const;
 
-  // Community detection algorithm
-  Graph louvain(const int iterations) const;
-  float modularity(std::unordered_map<int, int>& communities) const;
   int degree(int v) const;
   int get_edge(int v1, int v2) const;
 
@@ -68,7 +67,7 @@ class Graph {
   int makeLocal(int v) const { return v % vcount; }
   int localRowToGlobal(int v) const { assert(v < vcount); return v + (info->grid_row * vcount); }
   int localColToGlobal(int v) const { assert(v < vcount); return v + (info->grid_col * vcount); }
-
+  
   // print adj. mat. 
   void print_graph() const;
   void toggle_output() { output = true; }

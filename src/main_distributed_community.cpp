@@ -7,16 +7,6 @@
 
 namespace fs = std::filesystem;
 
-/*
-* EXAMPLE USAGE 
-* graph500 <INFILE>
-*
-*      graph500 graph.txt                      -- creates a distributed graph based on graph.txt
-* 
-*/
-
-
-
 struct Args {
   std::string infile;
 };
@@ -45,16 +35,39 @@ int run(int rank, int comm_size, Args args) {
   }
 
   Graph g(dir.string(), true);
-  DistCommunities comm(g);
+  DistCommunities dist_comm(g);
+
+  double init_mod = dist_comm.modularity();
+  dist_comm.iterate();
+  double new_mod = dist_comm.modularity();
+
+  if(rank == 0) 
+    std::cout << "Initial Modularity: " << init_mod << " and after one pass: " << new_mod << std::endl;
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  for(int i = 1; i < 4; i += 2) {
+    if(rank == i) {
+        for(int v = g.rows.first; v < g.rows.second; v++)
+          std::cout << "RANK " << rank << ": Vtx " << v << " Community: " << dist_comm.gbl_vtx_to_comm_map[v] << std::endl;
+
+        MPI_Barrier(g.info->col_comm);
+    }
+  }
+
 
   if(rank == 0) {
     std::string f("./data/graph/graph.txt");
     Graph g2(f, false);
-    g2.print_graph();
+    // g2.print_graph();
+    Communities comm(g2);
+    init_mod = comm.modularity();
+    comm.iterate();
+    new_mod = comm.modularity();
+    std::cout << "(No MPI) Initial Modularity: " << init_mod << " and after one pass: " << new_mod << std::endl;
 
-    std::cout << "\n\n";
-   for(int v = 0; v < g2.vcount; v++) 
-     std::cout << "Degree of vtx " << v << ": " << g2.degree(v) << std::endl;
+    for(int v = 0; v < g2.vcount; v++)
+      std::cout << "Vtx " << v << " Community: " << comm.node_to_comm_map[v] << std::endl;
   }
 
 
