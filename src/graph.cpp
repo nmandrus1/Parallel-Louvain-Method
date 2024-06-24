@@ -91,7 +91,7 @@ Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
   this->rows.second = this->rows.first + vcount;
 
   this->columns.first = vcount * info->grid_col;
-  this->columns.second = this->columns.first + vcount - 1;
+  this->columns.second = this->columns.first + vcount;
 }
 
 Graph::Graph(const std::string &fname, bool distributed) : Graph() {

@@ -243,6 +243,15 @@ DistCommunities::DistCommunities(Graph &g) : g(g) {
     total[v] = gbl_vtx_to_gbl_degree[v];  // Total degree of the community is the degree of the node.
     in[v] = 0;                            // Initially, no internal edges within the community.
   }
+
+  // do the same for columns of the processes that have different row/col vertices
+  if(g.info->grid_row != g.info->grid_col) {
+    for(int v = g.columns.first; v < g.columns.second; v++) {
+      gbl_vtx_to_comm_map[v] = v;
+      total[v] = gbl_vtx_to_gbl_degree[v];  // Total degree of the community is the degree of the node.
+      in[v] = 0;                            // Initially, no internal edges within the community.
+    }
+  }
 }
 
 // Inserts a node into a community and updates relevant metrics.
@@ -286,18 +295,21 @@ bool DistCommunities::iterate() {
   bool improvement = false, all_finished = false;
   std::vector<char> community_update_buf(sizeof(DistCommunityUpdate));
 
+  std::cout << "RANK " << g.info->rank << ": Entering iterate() while loop" << std::endl;
   while (true) {
     prev_num_moves = total_num_moves;
 
     for (int node = g.rows.first; node < g.rows.second; node++) {
       int node_comm = gbl_vtx_to_comm_map[node];
 
+      std::cout << "RANK " << g.info->rank << ": Computing neighbors" << std::endl;
       compute_neighbors(node); // Update the weights to all neighboring
                                // communities of the node.
 
       // Temporarily remove the node from its current community.
       remove(node, node_comm, neighbor_weights[node_comm]); 
 
+      std::cout << "RANK " << g.info->rank << ": Computing best community" << std::endl;
       // Determine the best community for this node based on potential modularity gain.
       int best_comm = compute_best_community( node, node_comm); 
 
@@ -316,13 +328,17 @@ bool DistCommunities::iterate() {
         update.best_comm = best_comm;
         update.node_comm_degree = neighbor_weights[node_comm];
         update.best_comm_degree = neighbor_weights[best_comm];
+
         serialize(update, community_update_buf);
+        std::cout << "RANK " << g.info->rank << ": Broadcasting update" << std::endl;
       }
 
       MPI_Bcast(community_update_buf.data(), community_update_buf.size(), MPI_CHAR, g.info->grid_col, g.info->col_comm);
 
       if(g.info->grid_col != g.info->grid_row) {
+        std::cout << "RANK " << g.info->rank << ": Receiving update" << std::endl;
         deserialize(community_update_buf, update);
+        // remove from old community, and update our total and in vectors
         remove(update.node, update.node_comm, update.node_comm_degree);
         insert(update.node, update.best_comm, update.best_comm_degree);
       }
@@ -330,6 +346,7 @@ bool DistCommunities::iterate() {
       if (best_comm != node_comm)
         total_num_moves++;
 
+      std::cout << "RANK " << g.info->rank << ": Waiting at Barrier" << std::endl;
       MPI_Barrier(MPI_COMM_WORLD);
     }
 
@@ -339,9 +356,16 @@ bool DistCommunities::iterate() {
     if (total_num_moves == prev_num_moves) 
       all_finished = true;
 
+    std::cout << "RANK " << g.info->rank << ": Communicating completion status" << std::endl;
     MPI_Allreduce(&all_finished, &all_finished, 1, MPI_C_BOOL, MPI_LAND, MPI_COMM_WORLD);
     if(all_finished) return improvement; // Return whether there was any improvement in this iteration.
 
+
+    auto mod = modularity();
+    if(g.info->rank == 0)
+      std::cout << "Modularity: " << mod << std::endl; 
+
+    MPI_Barrier(MPI_COMM_WORLD);
   }
 }
 

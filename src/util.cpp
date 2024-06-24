@@ -16,8 +16,8 @@ ProcInfo::ProcInfo() {
 
   // only compute MPI values if MPI process is active
   if(!initialized) {
-    std::cerr << "MPI not initialized, aborting...\n";
-    exit(EXIT_FAILURE);
+    std::cerr << "MPI not initialized...\n";
+    return;
   }
 
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);

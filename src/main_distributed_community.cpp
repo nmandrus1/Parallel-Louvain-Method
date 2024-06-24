@@ -46,7 +46,7 @@ int run(int rank, int comm_size, Args args) {
 
   MPI_Barrier(MPI_COMM_WORLD);
 
-  for(int i = 1; i < 4; i += 2) {
+  for(int i = 0; i < 3; i += 2) {
     if(rank == i) {
         for(int v = g.rows.first; v < g.rows.second; v++)
           std::cout << "RANK " << rank << ": Vtx " << v << " Community: " << dist_comm.gbl_vtx_to_comm_map[v] << std::endl;
