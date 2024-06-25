@@ -39,20 +39,22 @@ int run(int rank, int comm_size, Args args) {
 
   double init_mod = dist_comm.modularity();
   dist_comm.iterate();
+  MPI_Barrier(MPI_COMM_WORLD);
   double new_mod = dist_comm.modularity();
 
   if(rank == 0) 
     std::cout << "Initial Modularity: " << init_mod << " and after one pass: " << new_mod << std::endl;
 
-  MPI_Barrier(MPI_COMM_WORLD);
 
   for(int i = 0; i < 3; i += 2) {
     if(rank == i) {
         for(int v = g.rows.first; v < g.rows.second; v++)
-          std::cout << "RANK " << rank << ": Vtx " << v << " Community: " << dist_comm.gbl_vtx_to_comm_map[v] << std::endl;
+          std::cout << "RANK " << rank << ": Vtx " << v << " Community: " << dist_comm.gbl_vtx_to_comm_map[v] << "\n";
+        std::cout << std::endl;
 
-        MPI_Barrier(g.info->col_comm);
     }
+
+    MPI_Barrier(g.info->col_comm);
   }
 
 

@@ -5,7 +5,7 @@ include_directories(${CUDA_INCLUDE_DIRS})
 add_executable(graph500 main_distributed_community.cpp)
 add_executable(comm main_community.cpp)
 
-add_library(graphlib graph.h graph.cpp kernel.cu util.h util.cpp community.h community.cpp)
+add_library(graphlib graph.h graph.cpp util.h util.cpp community.h community.cpp)
 
 set_target_properties(graphlib PROPERTIES CUDA_ARCHITECTURES "60;70")
 

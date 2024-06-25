@@ -64,3 +64,4 @@ bin/*
 test/test_runner
 
 _deps
+.cache

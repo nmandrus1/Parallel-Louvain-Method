@@ -28,31 +28,10 @@ class Graph {
 
   Graph(const std::string& fname, bool distributed);
 
-  // generate a graph using kronecker algorithm
-  void from_kronecker(int scale, int edgefactor, unsigned long seed);
-  void from_kronecker_cuda(int scale, int edgefactor, unsigned long seed);
-
-  // add an edge between two vertices
-  // void add_edge(const int v1, const int v2);
-
   // get the list of vertices vertex is connected to (local indexing)
   std::vector<int> neighbors(const int vert) const;
   // get a list of vertices vert is connected to in the local graph (global indexing)
   std::vector<int> neighborsGlobalIdxs(const int vert) const;
-
-  // Perform a Top Down BFS from the specified source vertex and return the Parent Array
-  std::vector<int> top_down_bfs(const int src);
-
-  // Perform a Bottom Down BFS from the specified source vertex and return the Parent Array
-  std::vector<int> btm_down_bfs(const int src) const;
-  
-  // Perform a Parallel Top Down BFS from the specified source vertex and return the Parent Array
-  std::vector<int> parallel_top_down_bfs(const int src, int checkpoint_int);
-  // helper function to broadcast candidate parents across rows
-  std::vector<int> parallel_top_down_bfs_driver(std::vector<int> &parents, std::vector<int> &local_frontier, int checkpoint_int); 
-  void broadcast_to_row(std::unordered_map<int, int> &candidate_parents);
-  bool gather_global_frontier(const std::vector<int> local_frontier, std::vector<int>& global_frontier);
-  void checkpoint_data(const std::vector<int>& data, const int iteration, MPI_Comm comm, const char* filename) const;
 
   int degree(int v) const;
   int get_edge(int v1, int v2) const;
@@ -62,11 +41,12 @@ class Graph {
   bool in_row(int v) const { return (v >= this->rows.first && v <= this->rows.second); }
   bool contains(int v) const { return this->in_column(v) || this->in_row(v); }
 
-  // int getRowOwner(int v) const { return (v / vcount) * info.width; }
+  int getRowOwner(int v) const { return (v / vcount) * info->width; }
   // int getColOwner(int v) const { return v / vcount; }
   int makeLocal(int v) const { return v % vcount; }
   int localRowToGlobal(int v) const { assert(v < vcount); return v + (info->grid_row * vcount); }
   int localColToGlobal(int v) const { assert(v < vcount); return v + (info->grid_col * vcount); }
+
   
   // print adj. mat. 
   void print_graph() const;
@@ -90,9 +70,6 @@ class Graph {
   bool output;
 };
 
-
-std::vector<std::vector<int>> generate_kronecker_list(int scale, int edgefactor, unsigned long seed);
-std::vector<std::vector<int>> generate_kronecker_list_cuda(int scale, int edgefactor, unsigned long long seed);
 
 #endif
 

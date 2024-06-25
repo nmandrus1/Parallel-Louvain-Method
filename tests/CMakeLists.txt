@@ -3,12 +3,10 @@ include_directories(${MPI_INCLUDE_PATH})
 
 add_executable(runUnitTests main_test.cpp)
 add_executable(mpiUnitTests mpi_test.cpp)
-add_executable(gpuUnitTests gpu_test.cpp)
 
 # target_link_libraries(runUnitTests gtest gtest_main)
 target_link_libraries(runUnitTests PRIVATE gtest gtest_main graphlib ${MPI_LIBRARIES})
 target_link_libraries(mpiUnitTests PRIVATE gtest gtest_main graphlib ${MPI_LIBRARIES})
-target_link_libraries(gpuUnitTests PRIVATE gtest gtest_main graphlib ${MPI_LIBRARIES})
 
 add_test(NAME that_test COMMAND runUnitTests)
 
@@ -27,9 +25,3 @@ add_custom_target(basic_test
     USES_TERMINAL
 )
 
-add_custom_target(gpu_test
-    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${MPIEXEC_PREFLAGS} $<TARGET_FILE:gpuUnitTests> ${MPIEXEC_POSTFLAGS}
-    DEPENDS gpu_test
-    COMMENT "Running unit tests using GPU"
-    USES_TERMINAL
-)

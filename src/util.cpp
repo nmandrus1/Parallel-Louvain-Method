@@ -58,7 +58,6 @@ ProcInfo::~ProcInfo() {
   MPI_Comm_free(&col_comm);
 }
 
-
 std::vector<std::pair<int, int>> edge_list_from_file(const std::string& fname) {
     std::ifstream file(fname);
     if (!file.is_open()) {

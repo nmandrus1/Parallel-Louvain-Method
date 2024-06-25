@@ -1,6 +1,7 @@
 #include "community.h"
 #include <algorithm>
 #include <cstdio>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <mpi.h>
@@ -93,6 +94,53 @@ bool Communities::iterate() {
     if (total_num_moves == prev_num_moves)
       return improvement; // Return whether there was any improvement in this iteration.
   }
+}
+
+
+void DistCommunities::process_incoming_updates() {
+    MPI_Status status;
+    int flag;
+    CommunityUpdate update;
+
+    // Continue processing as long as there are messages
+    while (true) {
+        // Check for any incoming message
+        MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, &status);
+
+        if (flag) {
+            // Receive the update
+            MPI_Recv(&update, sizeof(update), MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+
+            if (status.MPI_TAG == MPI_ADDITION_TAG) {
+                // Handle addition
+                process_local_addition(update);
+                comm_subscribers[update.new_comm].insert(status.MPI_SOURCE);
+            } else if (status.MPI_TAG == MPI_REMOVAL_TAG) {
+                // Handle removal
+                process_local_removal(update);
+                comm_subscribers[update.old_comm].erase(status.MPI_SOURCE);
+            }
+        } else {
+            // No more messages to process
+            break;
+        }
+    }
+}
+
+void DistCommunities::process_local_addition(const CommunityUpdate& update) {
+    // Assuming gbl_vtx_to_comm_map, total, and in are accessible
+    gbl_vtx_to_comm_map[update.node] = update.new_comm;
+    total[update.new_comm] += update.global_degree;
+    in[update.new_comm] += 2 * update.new_comm_degree;  // Assuming edge weight needs to be doubled
+    std::cout << "Node " << update.node << " added to community " << update.new_comm << std::endl;
+}
+
+void DistCommunities::process_local_removal(const CommunityUpdate& update) {
+    if (gbl_vtx_to_comm_map[update.node] == update.old_comm) {
+        total[update.old_comm] -= update.global_degree;
+        in[update.old_comm] -= 2 * update.old_comm_degree;  // Assuming edge weight needs to be doubled
+        std::cout << "Node " << update.node << " removed from community " << update.old_comm << std::endl;
+    }
 }
 
 // Given a node and its current community, computes the best community for this
@@ -293,60 +341,54 @@ bool DistCommunities::iterate() {
   int total_num_moves = 0;
   int prev_num_moves = 0;
   bool improvement = false, all_finished = false;
-  std::vector<char> community_update_buf(sizeof(DistCommunityUpdate));
+  // std::vector<char> community_update_buf(sizeof(DistCommunityUpdate));
 
-  std::cout << "RANK " << g.info->rank << ": Entering iterate() while loop" << std::endl;
   while (true) {
     prev_num_moves = total_num_moves;
 
     for (int node = g.rows.first; node < g.rows.second; node++) {
       int node_comm = gbl_vtx_to_comm_map[node];
 
-      std::cout << "RANK " << g.info->rank << ": Computing neighbors" << std::endl;
       compute_neighbors(node); // Update the weights to all neighboring
                                // communities of the node.
 
       // Temporarily remove the node from its current community.
       remove(node, node_comm, neighbor_weights[node_comm]); 
 
-      std::cout << "RANK " << g.info->rank << ": Computing best community" << std::endl;
       // Determine the best community for this node based on potential modularity gain.
-      int best_comm = compute_best_community( node, node_comm); 
+      auto best = compute_best_community( node, node_comm); 
+      int best_comm = best.first;
+      double best_comm_weight = best.second;
 
-      // Insert the node into the best community found.
-      insert(node, best_comm, neighbor_weights[best_comm]); 
+      if(best_comm != node_comm) {
+        // MPI_Request req;
+        CommunityUpdate update = {node, gbl_vtx_to_gbl_degree[node], node_comm, best_comm, neighbor_weights[node_comm], best_comm_weight};
+        int old_owner = g.getRowOwner(node_comm);
+        int new_owner = g.getRowOwner(best_comm);
 
-      // Communicate Community updates
-      // Every process in this row should have the best community for this iteration
-      // so now we just need to update every process that has any neighbor vertices that 
-      // are vertices of THIS process's rows.
+        if(old_owner != g.info->rank) {
+          MPI_Send(&update, sizeof(CommunityUpdate), MPI_BYTE, old_owner, MPI_REMOVAL_TAG, MPI_COMM_WORLD);
+        } else {
+          process_local_removal(update);
+        }
 
-      DistCommunityUpdate update;
-      if(g.info->grid_col == g.info->grid_row) {
-        update.node = node;
-        update.node_comm = node_comm;
-        update.best_comm = best_comm;
-        update.node_comm_degree = neighbor_weights[node_comm];
-        update.best_comm_degree = neighbor_weights[best_comm];
+        MPI_Send(&update, sizeof(CommunityUpdate), MPI_BYTE, new_owner, MPI_ADDITION_TAG, MPI_COMM_WORLD);
 
-        serialize(update, community_update_buf);
-        std::cout << "RANK " << g.info->rank << ": Broadcasting update" << std::endl;
+        // values for in and total vectors will come in during update_subscribers
+        gbl_vtx_to_comm_map[node] = best_comm;
+
+        total_num_moves++;
       }
 
-      MPI_Bcast(community_update_buf.data(), community_update_buf.size(), MPI_CHAR, g.info->grid_col, g.info->col_comm);
+      MPI_Barrier(MPI_COMM_WORLD);
+      // recieve updates from remote process about nodes joining local community
+      process_incoming_updates();
 
-      if(g.info->grid_col != g.info->grid_row) {
-        std::cout << "RANK " << g.info->rank << ": Receiving update" << std::endl;
-        deserialize(community_update_buf, update);
-        // remove from old community, and update our total and in vectors
-        remove(update.node, update.node_comm, update.node_comm_degree);
-        insert(update.node, update.best_comm, update.best_comm_degree);
-      }
+      update_subscribers();
 
       if (best_comm != node_comm)
         total_num_moves++;
 
-      std::cout << "RANK " << g.info->rank << ": Waiting at Barrier" << std::endl;
       MPI_Barrier(MPI_COMM_WORLD);
     }
 
@@ -356,7 +398,6 @@ bool DistCommunities::iterate() {
     if (total_num_moves == prev_num_moves) 
       all_finished = true;
 
-    std::cout << "RANK " << g.info->rank << ": Communicating completion status" << std::endl;
     MPI_Allreduce(&all_finished, &all_finished, 1, MPI_C_BOOL, MPI_LAND, MPI_COMM_WORLD);
     if(all_finished) return improvement; // Return whether there was any improvement in this iteration.
 
@@ -369,11 +410,42 @@ bool DistCommunities::iterate() {
   }
 }
 
+void DistCommunities::update_subscribers() {
+  MPI_Status status;
+  int flag;
+  CommunityInfo comm_info;
+
+  for (auto& [comm, ranks]: comm_subscribers) {
+   CommunityInfo updated_info = {comm, in[comm], total[comm]}; 
+   for(int rank: ranks) 
+     MPI_Send(&updated_info, sizeof(CommunityInfo), MPI_BYTE, rank, MPI_COMM_SYNC, MPI_COMM_WORLD);
+  }
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  // Check for incoming community updates
+  while(true) {
+      MPI_Iprobe(MPI_ANY_SOURCE, MPI_COMM_SYNC, MPI_COMM_WORLD, &flag, &status);
+
+      if (flag) {
+          MPI_Recv(&comm_info, sizeof(CommunityInfo), MPI_BYTE, MPI_ANY_SOURCE, MPI_COMM_SYNC, MPI_COMM_WORLD, &status);
+
+          // Process the received community info
+          in[comm_info.comm] = comm_info.in;
+          total[comm_info.comm] = comm_info.total;
+      } else {
+          // No more updates available at this time
+          break;
+      }
+  }
+}
+
 // Given a node and its current community, computes the best community for this
 // node that would increase the modularity the most.
-int DistCommunities::compute_best_community(int node, int node_comm) {
+std::pair<int,double> DistCommunities::compute_best_community(int node, int node_comm) {
   int best_comm = node_comm;
   double best_increase = 0.0;
+  double best_comm_weight;
   for (auto neighbor_comm : neighbor_comms) {
     double increase = modularity_gain(node, neighbor_comm, neighbor_weights[neighbor_comm]);
     if (increase > best_increase) {
@@ -382,22 +454,27 @@ int DistCommunities::compute_best_community(int node, int node_comm) {
     }
   }
 
+  best_comm_weight = neighbor_weights[best_comm];
+
   // Row wise communicaiton to determine best community 
   std::vector<int> best_comm_recv_buf(g.info->width);
   std::vector<double> best_increase_recv_buf(g.info->width);
+  std::vector<double> best_comm_weight_recv_buf(g.info->width);
 
   MPI_Allgather(&best_comm, 1, MPI_INT, best_comm_recv_buf.data(), 1, MPI_INT, g.info->row_comm);
   MPI_Allgather(&best_increase, 1, MPI_DOUBLE, best_increase_recv_buf.data(), 1, MPI_DOUBLE, g.info->row_comm);
+  MPI_Allgather(&best_comm_weight, 1, MPI_DOUBLE, best_comm_weight_recv_buf.data(), 1, MPI_DOUBLE, g.info->row_comm);
 
   for(int rank = 0; rank < g.info->width; rank++) {
     double increase = best_increase_recv_buf[rank];
     if (increase > best_increase) {
       best_comm = best_comm_recv_buf[rank];
       best_increase = increase;
+      best_comm_weight = best_comm_weight_recv_buf[rank];
     }
   }
 
-  return best_comm;
+  return std::make_pair(best_comm, best_comm_weight);
 }
 
 // Computes and updates internal structures with weights corresponding to each
