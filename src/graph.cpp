@@ -8,9 +8,7 @@
 #include <iterator>
 #include <map>
 #include <mpi.h>
-#include <queue>
 #include <set>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -19,7 +17,7 @@
 
 // default constructor
 Graph::Graph(size_t vcount) : Graph() {
-  this->vcount = vcount;
+  this->local_vcount = vcount;
   this->data.resize(vcount * vcount, 0);
 }
 
@@ -32,7 +30,11 @@ Graph::Graph(const std::vector<std::pair<int, int>> edge_list) : Graph() {
     adj_list[pair.second].insert((unsigned)pair.first);
   }
 
-  vcount = adj_list.size();
+  local_vcount = adj_list.size();
+  global_vcount = adj_list.size();
+
+  rows.first = 0;
+  rows.second = local_vcount;
 
   int nnz = 0;
   row_index.push_back(nnz);
@@ -52,7 +54,7 @@ Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
     : Graph() {
 
   this->ecount = edge_list.size();
-  this->vcount = vcount;
+  this->local_vcount = vcount;
   std::vector<bool> adj_mat(vcount * vcount, 0);
 
   // loop over every edge pair and add it to the graph
@@ -61,8 +63,8 @@ Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
       continue;
 
     // 1-d indexing
-    adj_mat[pair.first * this->vcount + pair.second] = true;
-    adj_mat[pair.second * this->vcount + pair.first] = true;
+    adj_mat[pair.first * this->local_vcount + pair.second] = true;
+    adj_mat[pair.second * this->local_vcount + pair.first] = true;
   }
 
   // sparsify
@@ -81,12 +83,6 @@ Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
 
     this->row_index.push_back(nnz);
   }
-
-  this->rows.first = vcount * info->grid_row;
-  this->rows.second = this->rows.first + vcount;
-
-  this->columns.first = vcount * info->grid_col;
-  this->columns.second = this->columns.first + vcount;
 }
 
 Graph::Graph(const std::string &fname, bool distributed) : Graph() {
@@ -96,6 +92,8 @@ Graph::Graph(const std::string &fname, bool distributed) : Graph() {
     *this = Graph(edges);
     return;
   }
+
+  
 
   // if this is a distributed graph, we need to calculate which edges belong
   // where For now we assume that all edges are numbered 0 to n with no gaps map
@@ -114,23 +112,24 @@ Graph::Graph(const std::string &fname, bool distributed) : Graph() {
   // globally, info->width is the width of the process grid
   // so with 4 mpi procs info->width = 2 and the total number of
   // vertices is (max_vtx + 1) / 2 = 16/2 -> 8
-  vcount = (max_vtx + 1) / info->width;
+  global_vcount = max_vtx + 1;
+  local_vcount = global_vcount / info->comm_size;
+
+  rows.first = info->rank * local_vcount;
+  rows.second = rows.first + local_vcount;
 
   int edge_count = edges.size();
   MPI_Allreduce(&edge_count, &edge_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
   ecount = edge_count;
 
+  
   std::unordered_map<int, std::vector<int>> msg_map;
   for (auto edge : edges) {
     auto v1 = edge.first;
     auto v2 = edge.second;
 
-    auto v1_cord = v1 / vcount;
-    auto v2_cord = v2 / vcount;
-
-    int rank1 = (info->width * v1_cord) + v2_cord;
-    int rank2 = (info->width * v2_cord) + v1_cord;
-
+    auto rank1 = v1 / local_vcount;
+    auto rank2 = v2 / local_vcount;
     msg_map[rank1].push_back(v1);
     msg_map[rank1].push_back(v2);
 
@@ -209,28 +208,23 @@ Graph::Graph(const std::string &fname, bool distributed) : Graph() {
   for (int i = 0; i < total_ints_to_recv; i += 2) {
     int vertex = recv_buf[i];
     int parent = recv_buf[i + 1];
-    edges.push_back(std::make_pair(makeLocal(vertex), makeLocal(parent)));
+    edges.push_back(std::make_pair(makeLocal(vertex), parent));
   }
 
   // this->ecount = edges.size();
-  std::vector<bool> adj_mat(vcount * vcount, 0);
+  std::vector<bool> adj_mat(local_vcount * global_vcount, 0);
 
   // loop over every edge pair and add it to the graph
-  for (auto pair : edges) {
-    if (pair.first == pair.second)
-      continue;
-
-    // 1-d indexing
-    adj_mat[pair.first * this->vcount + pair.second] = true;
-  }
+  for (auto pair : edges)
+    adj_mat[pair.first * global_vcount + pair.second] = true;
 
   // sparsify
   int nnz = 0;
   row_index.push_back(nnz);
 
-  for (unsigned i = 0; i < vcount; i++) {
-    for (unsigned j = 0; j < vcount; j++) {
-      int entry = adj_mat[i * vcount + j];
+  for (unsigned i = 0; i < local_vcount; i++) {
+    for (unsigned j = 0; j < global_vcount; j++) {
+      int entry = adj_mat[i * global_vcount + j];
       if (entry != 0) {
         data.push_back(entry);
         column_index.push_back(j);
@@ -240,16 +234,14 @@ Graph::Graph(const std::string &fname, bool distributed) : Graph() {
 
     row_index.push_back(nnz);
   }
-
-  rows.first = vcount * info->grid_row;
-  rows.second = rows.first + vcount;
-  
-  columns.first = vcount * info->grid_col;
-  columns.second = columns.first + vcount;
 }
 
 // get the list of vertices vert is connected to
-std::vector<int> Graph::neighbors(const int vert) const {
+std::vector<int> Graph::neighbors(const int v) const {
+  assert(in_row(v));
+  int vert = makeLocal(v);
+
+
   std::vector<int> ret;
 
   unsigned row_start = this->row_index[vert];
@@ -263,58 +255,20 @@ std::vector<int> Graph::neighbors(const int vert) const {
   return ret;
 }
 
-// Assuming that vert is the global vertex index
-std::vector<int> Graph::neighborsGlobalIdxs(const int vert) const {
-  int local = vert % vcount;
-  std::vector<int> ret;
-
-  unsigned row_start = this->row_index[local];
-  unsigned row_end = this->row_index[local + 1];
-
-  // loop over every vertex and push back those vert is adjacent to
-  for (unsigned i = row_start; i < row_end; i++) {
-    ret.push_back(localColToGlobal(column_index[i]));
-  }
-
-  return ret;
-}
-
 void Graph::print_graph() const {
-  for (unsigned i = 0; i < this->vcount; i++) {
+  for (unsigned i = 0; i < this->local_vcount; i++) {
     auto edges = neighbors(i);
     auto edges_iter = edges.begin();
 
-    for (unsigned j = 0; j < this->vcount; j++) {
+    for (unsigned j = 0; j < this->global_vcount; j++) {
       if (edges_iter != edges.end() && *edges_iter == j) {
         std::cout << 1;
         edges_iter++;
-      } else
-        std::cout << "0";
+      } else std::cout << "0";
 
       std::cout << " ";
     }
     std::cout << "\n";
   }
   std::cout << std::endl;
-}
-
-// test CUDA function
-
-// Return the sum of the edge weights (the number of edges for unweighted graph)
-int Graph::degree(int v) const {
-  return this->row_index[v + 1] - this->row_index[v];
-}
-
-int Graph::get_edge(int v1, int v2) const {
-  unsigned row_start = this->row_index[v1];
-  unsigned row_end = this->row_index[v1 + 1];
-
-  for (unsigned i = row_start; i < row_end; i++) {
-    if (this->column_index[i] == v2)
-      return column_index[i];
-    else if (this->column_index[i] > v2)
-      break;
-  }
-
-  return 0;
 }

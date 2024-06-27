@@ -1,16 +1,14 @@
 #ifndef __UTIL_H_
 #define __UTIL_H_
 
-#include <cmath>
 #include <mpi.h>
-#include <iostream>
 #include <vector>
+#include <string>
 
 
 struct ProcInfo {
   // store rank, row, and column of adj matrix
-  int rank, row_rank,col_rank, comm_size, grid_row, grid_col, width; 
-  MPI_Comm row_comm, col_comm;
+  int rank, comm_size; 
   
   static ProcInfo* instance;
 

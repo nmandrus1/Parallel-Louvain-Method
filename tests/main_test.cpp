@@ -1,9 +1,7 @@
 #include "graph.h"
 #include "community.h"
-#include <cstddef>
 #include <cstdlib>
 #include <gtest/gtest.h>
-#include <iostream>
 #include <utility>
 #include <vector>
 
@@ -51,30 +49,6 @@ TEST(BasicGraphTests, FromEdgeList) {
   // ASSERT_EQ(list, expected);
 }
 
-TEST(BasicGraphTests, TopDownBfsTest) {
-  std::vector<std::pair<int, int>> edges = {
-      {0, 1}, {0, 2}, {1, 2}, {1, 3}, {2, 4}};
-  Graph g(edges, 5);
-
-  auto parent = g.top_down_bfs(0);
-  std::vector<int> expected = {0, 0, 0, 1, 2};
-  ASSERT_EQ(parent, expected);
-}
-
-TEST(BasicGraphTests, BtmDownBfsTest) {
-  std::vector<std::pair<int, int>> edges = {
-      {0, 1}, {0, 2}, {1, 2}, {1, 3}, {2, 4}};
-  Graph g(edges, 5);
-
-  auto parent = g.btm_down_bfs(0);
-  std::vector<int> expected = {0, 0, 0, 1, 2};
-  ASSERT_EQ(parent, expected);
-}
-
-TEST(KroneckerTest, BasicKroneckerEdgeList) {
-  auto list = generate_kronecker_list(5, 16, 123);
-}
-
 TEST(CommunityDetection, Small) {
   std::vector<std::pair<int, int>> edges = {
       {1, 2},  {1, 4},  {1, 7},   {2, 0},   {2, 4},   {2, 5},   {2, 6},
@@ -96,7 +70,7 @@ TEST(CommunityDetection, Small) {
 
   Graph g2 = c.into_new_graph();
 
-  ASSERT_EQ(g2.vcount, 4);
+  ASSERT_EQ(g2.local_vcount, 4);
 }
 
 int main(int argc, char *argv[]) {

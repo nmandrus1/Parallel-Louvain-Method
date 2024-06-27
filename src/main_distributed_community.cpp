@@ -4,6 +4,7 @@
 #include "community.h"
 #include "graph.h"
 #include <string>
+#include <iostream>
 
 namespace fs = std::filesystem;
 
@@ -46,7 +47,8 @@ int run(int rank, int comm_size, Args args) {
     std::cout << "Initial Modularity: " << init_mod << " and after one pass: " << new_mod << std::endl;
 
 
-  for(int i = 0; i < 3; i += 2) {
+  MPI_Barrier(MPI_COMM_WORLD);
+  for(int i = 0; i < comm_size; i++) {
     if(rank == i) {
         for(int v = g.rows.first; v < g.rows.second; v++)
           std::cout << "RANK " << rank << ": Vtx " << v << " Community: " << dist_comm.gbl_vtx_to_comm_map[v] << "\n";
@@ -54,23 +56,23 @@ int run(int rank, int comm_size, Args args) {
 
     }
 
-    MPI_Barrier(g.info->col_comm);
+    MPI_Barrier(MPI_COMM_WORLD);
   }
 
 
-  if(rank == 0) {
-    std::string f("./data/graph/graph.txt");
-    Graph g2(f, false);
-    // g2.print_graph();
-    Communities comm(g2);
-    init_mod = comm.modularity();
-    comm.iterate();
-    new_mod = comm.modularity();
-    std::cout << "(No MPI) Initial Modularity: " << init_mod << " and after one pass: " << new_mod << std::endl;
+  // if(rank == 0) {
+  //   std::string f("./data/graph/graph.txt");
+  //   Graph g2(f, false);
+  //   // g2.print_graph();
+  //   Communities comm(g2);
+  //   init_mod = comm.modularity();
+  //   comm.iterate();
+  //   new_mod = comm.modularity();
+  //   std::cout << "(No MPI) Initial Modularity: " << init_mod << " and after one pass: " << new_mod << std::endl;
 
-    for(int v = 0; v < g2.vcount; v++)
-      std::cout << "Vtx " << v << " Community: " << comm.node_to_comm_map[v] << std::endl;
-  }
+  //   for(int v = 0; v < g2.vcount; v++)
+  //     std::cout << "Vtx " << v << " Community: " << comm.node_to_comm_map[v] << std::endl;
+  // }
 
 
   return 0;

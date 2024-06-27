@@ -2,12 +2,8 @@
 #define __GRAPH_H__
 
 #include <cstddef>
-#include <cstdint>
-#include <unordered_map>
 #include <utility>
 #include <vector>
-#include <random>
-#include <algorithm>
 #include <cassert>
 
 #include "util.h"
@@ -17,7 +13,7 @@ class Graph {
 
   public:
   // Initialize to create an empty graph with no vertices.}
-  Graph() : vcount(0), ecount(0), data(), info(ProcInfo::getInstance()), columns(), rows(), output(false) {}
+  Graph() : local_vcount(0), global_vcount(0), ecount(0), data(), info(ProcInfo::getInstance()), rows(), output(false) {}
   
   // constructor creates adj. mat. with vcount^2 elements in data vector
   Graph(size_t vcount);
@@ -30,23 +26,20 @@ class Graph {
 
   // get the list of vertices vertex is connected to (local indexing)
   std::vector<int> neighbors(const int vert) const;
-  // get a list of vertices vert is connected to in the local graph (global indexing)
-  std::vector<int> neighborsGlobalIdxs(const int vert) const;
+  inline int degree(int v) const { 
+    assert(in_row(v)); 
+    int vert = makeLocal(v);
+    return this->row_index[vert + 1] - this->row_index[vert];
+  }
 
-  int degree(int v) const;
   int get_edge(int v1, int v2) const;
 
-  // checks process info to determine if this graph has a partial edge list for v
-  bool in_column(int v) const { return v >= this->columns.first && v <= this->columns.second; }
-  bool in_row(int v) const { return (v >= this->rows.first && v <= this->rows.second); }
-  bool contains(int v) const { return this->in_column(v) || this->in_row(v); }
+  bool in_row(int v) const { return (v >= this->rows.first && v < this->rows.second); }
 
-  int getRowOwner(int v) const { return (v / vcount) * info->width; }
-  // int getColOwner(int v) const { return v / vcount; }
-  int makeLocal(int v) const { return v % vcount; }
-  int localRowToGlobal(int v) const { assert(v < vcount); return v + (info->grid_row * vcount); }
-  int localColToGlobal(int v) const { assert(v < vcount); return v + (info->grid_col * vcount); }
-
+  // Assuming global indexing
+  int getRankOfOwner(int v) const { return v / local_vcount; }
+  int makeLocal(int v) const { return v % local_vcount; }
+  int localRowToGlobal(int v) const { assert(v < local_vcount); return v + (info->rank * local_vcount); }
   
   // print adj. mat. 
   void print_graph() const;
@@ -58,14 +51,14 @@ class Graph {
   std::vector<unsigned> column_index;
 
   // number of vertices
-  size_t vcount;
+  size_t local_vcount;
+  size_t global_vcount;
   // number of vertices
   size_t ecount;
   // info on MPI Processes/Topology
   const ProcInfo* info;
 
-  // start and end (inclusive) ownership for rows and columns
-  std::pair<int, int> columns;
+  // start and end (inclusive) ownership for rows
   std::pair<int, int> rows;
   bool output;
 };

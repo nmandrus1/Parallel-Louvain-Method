@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 #include <sstream>
-#include <cassert>
+#include <iostream>
 
 ProcInfo* ProcInfo::instance = nullptr;
 
@@ -22,40 +22,6 @@ ProcInfo::ProcInfo() {
 
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
-
-  width = sqrt(comm_size);
-
-  if(width * width != comm_size) {
-    if(rank == 0)
-      std::cout << "ERROR: value of " << comm_size << " is not square and therefore cannot be partitoned properly. Aborting..." << std::endl;
-
-    exit(EXIT_FAILURE);
-  }
-
-
-  grid_row = std::floor(rank/width);
-  grid_col = rank % width;
-
-  MPI_Comm_split(MPI_COMM_WORLD, grid_row, rank, &row_comm);
-  MPI_Comm_split(MPI_COMM_WORLD, grid_col, rank, &col_comm);
-
-  assert(row_comm != MPI_COMM_NULL);
-  assert(col_comm != MPI_COMM_NULL);
-
-  MPI_Comm_rank(row_comm, &row_rank);
-  MPI_Comm_rank(col_comm, &col_rank);
-}
-
-ProcInfo::~ProcInfo() {
-  int initialized;
-  MPI_Initialized(&initialized);
-
-  // only compute MPI values if MPI process is active
-  if(!initialized) 
-    return;
-
-  MPI_Comm_free(&row_comm);
-  MPI_Comm_free(&col_comm);
 }
 
 std::vector<std::pair<int, int>> edge_list_from_file(const std::string& fname) {

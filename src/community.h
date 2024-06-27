@@ -3,12 +3,12 @@
 
 #include "graph.h"
 #include <unordered_map>
-#include <cstring>
 #include <unordered_set>
 
 #define MPI_REMOVAL_TAG 0
 #define MPI_ADDITION_TAG 1
 #define MPI_COMM_SYNC 2
+#define MPI_NEIGHBOR_SYNC 3
 
 
 struct Communities {
@@ -21,7 +21,7 @@ struct Communities {
   // these are repopulated for every node 
   // when computing neighboring community weights
   std::vector<int> neighbor_comms;
-  std::vector<double> neighbor_weights;
+  std::vector<double> edges_to_other_comms;
 
   Communities(Graph& g);
   
@@ -46,8 +46,8 @@ struct CommunityUpdate {
   int global_degree;
   int old_comm;
   int new_comm;
-  double old_comm_degree;
-  double new_comm_degree;
+  double edges_within_old_comm;
+  double edges_within_new_comm;
 };
 
 struct CommunityInfo {
@@ -65,10 +65,8 @@ struct DistCommunities {
 
   // will map neighboring nodes to communities
   std::unordered_map<int, int> gbl_vtx_to_comm_map;
-  // will map community ids to a community degree
-  std::unordered_map<int,int> gbl_comm_to_degree_map;
 
-  std::unordered_map<int,int> gbl_vtx_to_gbl_degree;
+  std::unordered_map<int,int> neighbor_degree;
 
   // stores running summations used to quickly calculate community modularity
   std::unordered_map<int, double> in, total;
@@ -80,12 +78,14 @@ struct DistCommunities {
 
   // a map of communities to the ranks that need updated community information 
   std::unordered_map<int, std::unordered_set<int>> comm_subscribers;
+  // map of local vertices to a set of ranks that own their neighbors
+  std::unordered_map<int, std::unordered_set<int>> neighbor_subscribers;
 
   DistCommunities(Graph& g);
   
   void insert(int node, int community, int node_comm_degree);
   void remove(int node, int community, int node_comm_degree);
-  std::pair<int,double> compute_best_community(int node, int node_comm);
+  int compute_best_community(int node, int node_comm);
   void compute_neighbors(int node);
   double modularity_gain(int node, int comm, double node_comm_degree);
   bool iterate();
@@ -95,6 +95,7 @@ struct DistCommunities {
   void process_local_removal(const CommunityUpdate& update);
   void process_local_addition(const CommunityUpdate& update);
   void update_subscribers();
+  void update_neighbors();
 
   double modularity();
 
