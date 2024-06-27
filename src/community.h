@@ -56,6 +56,10 @@ struct CommunityInfo {
   double total;
 };
 
+struct NeighborUpdate {
+  int node;
+  CommunityInfo comm_info;
+};
 
 // Distributed Community Detection
 struct DistCommunities {
@@ -74,11 +78,12 @@ struct DistCommunities {
   // these are repopulated for every node 
   // when computing neighboring community weights
   std::vector<int> neighbor_comms;
-  std::unordered_map<int, double> neighbor_weights;
+  std::unordered_map<int, double> edges_to_other_comms;
 
   // a map of communities to the ranks that need updated community information 
   std::unordered_map<int, std::unordered_set<int>> comm_subscribers;
-  // map of local vertices to a set of ranks that own their neighbors
+
+  // maps local vertices to ranks that need updates on this vertex's community
   std::unordered_map<int, std::unordered_set<int>> neighbor_subscribers;
 
   DistCommunities(Graph& g);

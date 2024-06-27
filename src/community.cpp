@@ -193,7 +193,7 @@ DistCommunities::DistCommunities(Graph &g) : g(g) {
   in.reserve(g.local_vcount * 2);
   total.reserve(g.local_vcount * 2);
   neighbor_comms.resize(g.local_vcount);
-  neighbor_weights.reserve(g.local_vcount * 2);
+  edges_to_other_comms.reserve(g.local_vcount * 2);
   neighbor_degree.reserve(g.local_vcount * 2);
 
   std::unordered_map<int, std::vector<int>> msg_map;
@@ -248,7 +248,11 @@ DistCommunities::DistCommunities(Graph &g) : g(g) {
      gbl_vtx_to_comm_map[n] = n;
      total[n] = neighbor_degree[n];
      in[n] = 0;
-     neighbor_subscribers[v].insert(g.getRankOfOwner(n));
+
+     int neighbor_owner = g.getRankOfOwner(n);
+     // if there is a remote neighbor that needs to be kept up to date add them to subscriber list
+     if(neighbor_owner != g.info->rank)
+       neighbor_subscribers[v].insert(neighbor_owner);
     }
   }
 }
@@ -304,31 +308,32 @@ bool DistCommunities::iterate() {
 
       // Temporarily remove the node from its current community.
       std::cout << "RANK " << g.info->rank << ": Removing vtx " << node << " from comm " << node_comm << std::endl;
-      remove(node, node_comm, neighbor_weights[node_comm]); 
+      remove(node, node_comm, edges_to_other_comms[node_comm]); 
 
       // Determine the best community for this node based on potential modularity gain.
       std::cout << "RANK " << g.info->rank << ": computing best comm" << std::endl;
       auto best_comm = compute_best_community( node, node_comm); 
-      std::cout << "RANK " << g.info->rank << ": best comme = " << best_comm << std::endl;
+      std::cout << "RANK " << g.info->rank << ": best comm = " << best_comm << std::endl;
 
       if(best_comm != node_comm) {
         // MPI_Request req;
-        CommunityUpdate update = {node, g.degree(node), node_comm, best_comm, neighbor_weights[node_comm], neighbor_weights[best_comm]};
-        int old_owner = g.getRankOfOwner(node_comm);
-        int new_owner = g.getRankOfOwner(best_comm);
+        CommunityUpdate update = {node, g.degree(node), node_comm, best_comm, edges_to_other_comms[node_comm], edges_to_other_comms[best_comm]};
+        // calculate the ranks that own the old and new communities
+        int old_comm_owner = g.getRankOfOwner(node_comm);
+        int new_comm_owner = g.getRankOfOwner(best_comm);
 
-        std::cout << "RANK " << g.info->rank << ": Communicating removal/addition \t old: " << old_owner << " new: " << new_owner << std::endl;
-        if(old_owner != g.info->rank) 
-          MPI_Send(&update, sizeof(CommunityUpdate), MPI_BYTE, old_owner, MPI_REMOVAL_TAG, MPI_COMM_WORLD);
+        std::cout << "RANK " << g.info->rank << ": Communicating removal/addition \t old: " << old_comm_owner << " new: " << new_comm_owner << std::endl;
+        if(old_comm_owner != g.info->rank) 
+          MPI_Send(&update, sizeof(CommunityUpdate), MPI_BYTE, old_comm_owner, MPI_REMOVAL_TAG, MPI_COMM_WORLD);
         // No else required since if the old owner was this rank then it was removed properly by the remove() call 
         
-        if(new_owner != g.info->rank) {
-          MPI_Send(&update, sizeof(CommunityUpdate), MPI_BYTE, new_owner, MPI_ADDITION_TAG, MPI_COMM_WORLD);
+        if(new_comm_owner != g.info->rank) {
+          MPI_Send(&update, sizeof(CommunityUpdate), MPI_BYTE, new_comm_owner, MPI_ADDITION_TAG, MPI_COMM_WORLD);
           gbl_vtx_to_comm_map[node] = best_comm;
-        } else insert(node, best_comm, neighbor_weights[best_comm]);
+        } else insert(node, best_comm, edges_to_other_comms[best_comm]);
         
         total_num_moves++;
-      } else insert(node, best_comm, neighbor_weights[best_comm]);
+      } else insert(node, best_comm, edges_to_other_comms[best_comm]);
 
       MPI_Barrier(MPI_COMM_WORLD);
       // recieve updates from remote process about nodes joining local community
@@ -337,6 +342,7 @@ bool DistCommunities::iterate() {
 
       std::cout << "RANK " << g.info->rank << ": Updating subscriber procs" << std::endl;
       update_subscribers();
+      update_neighbors();
 
       if (best_comm != node_comm)
         total_num_moves++;
@@ -443,13 +449,13 @@ void DistCommunities::update_subscribers() {
 void DistCommunities::update_neighbors() {
   MPI_Status status;
   int flag;
-  CommunityInfo comm_info;
+  NeighborUpdate updated_info;
 
   for (auto& [vtx, ranks]: neighbor_subscribers) {
     int comm = gbl_vtx_to_comm_map[vtx];
-    CommunityInfo updated_info = {comm, in[comm], total[comm]}; 
+    updated_info = {vtx, {comm, in[comm], total[comm]}}; 
     for(int rank: ranks) 
-      MPI_Send(&updated_info, sizeof(CommunityInfo), MPI_BYTE, rank, MPI_NEIGHBOR_SYNC, MPI_COMM_WORLD);
+      MPI_Send(&updated_info, sizeof(NeighborUpdate), MPI_BYTE, rank, MPI_NEIGHBOR_SYNC, MPI_COMM_WORLD);
   }
 
   MPI_Barrier(MPI_COMM_WORLD);
@@ -459,11 +465,12 @@ void DistCommunities::update_neighbors() {
       MPI_Iprobe(MPI_ANY_SOURCE, MPI_NEIGHBOR_SYNC, MPI_COMM_WORLD, &flag, &status);
 
       if (flag) {
-          MPI_Recv(&comm_info, sizeof(CommunityInfo), MPI_BYTE, MPI_ANY_SOURCE, MPI_NEIGHBOR_SYNC, MPI_COMM_WORLD, &status);
+          MPI_Recv(&updated_info, sizeof(NeighborUpdate), MPI_BYTE, MPI_ANY_SOURCE, MPI_NEIGHBOR_SYNC, MPI_COMM_WORLD, &status);
 
           // Process the received community info
-          in[comm_info.comm] = comm_info.in;
-          total[comm_info.comm] = comm_info.total;
+          gbl_vtx_to_comm_map[updated_info.node] = updated_info.comm_info.comm;
+          in[updated_info.comm_info.comm] = updated_info.comm_info.in;
+          total[updated_info.comm_info.comm] = updated_info.comm_info.total;
       } else {
           // No more updates available at this time
           break;
@@ -476,7 +483,7 @@ int DistCommunities::compute_best_community(int node, int node_comm) {
   int best_comm = node_comm;
   double best_increase = 0.0;
   for (auto neighbor_comm : neighbor_comms) {
-    double increase = modularity_gain(node, neighbor_comm, neighbor_weights[neighbor_comm]);
+    double increase = modularity_gain(node, neighbor_comm, edges_to_other_comms[neighbor_comm]);
     if (increase > best_increase) {
       best_comm = neighbor_comm;
       best_increase = increase;
@@ -490,7 +497,7 @@ int DistCommunities::compute_best_community(int node, int node_comm) {
 // neighboring community of a given node.
 void DistCommunities::compute_neighbors(int node) {
   neighbor_comms.clear();
-  neighbor_weights.clear();
+  edges_to_other_comms.clear();
 
   for (int neighbor : g.neighbors(node)) {
     int neighbor_comm = gbl_vtx_to_comm_map[neighbor];
@@ -498,13 +505,13 @@ void DistCommunities::compute_neighbors(int node) {
     if (node != neighbor) {
       // if this neighbor community hasn't been seen yet, 
       // initialize it before adding weight to it
-      if (!neighbor_weights.contains(neighbor_comm)) {
-        neighbor_weights[neighbor_comm] = 0;
+      if (!edges_to_other_comms.contains(neighbor_comm)) {
+        edges_to_other_comms[neighbor_comm] = 0;
         neighbor_comms.push_back(neighbor_comm);
       }
 
       // Increment the edge weight to the neighboring community.
-      neighbor_weights[neighbor_comm] += 1.0; 
+      edges_to_other_comms[neighbor_comm] += 1.0; 
     }
   }
 }
