@@ -7,8 +7,9 @@
 
 #define MPI_REMOVAL_TAG 0
 #define MPI_ADDITION_TAG 1
-#define MPI_COMM_SYNC 2
+#define MPI_DATA_TAG 2
 #define MPI_NEIGHBOR_SYNC 3
+#define MPI_COMM_SYNC 4
 
 
 struct Communities {
@@ -42,12 +43,20 @@ struct Communities {
 
 
 struct CommunityUpdate {
+
+  enum UpdateType {
+    Addition,
+    Removal
+  };
+
+  UpdateType type;
   int node;
   int global_degree;
   int old_comm;
   int new_comm;
   double edges_within_old_comm;
   double edges_within_new_comm;
+  int num_ranks_bordering_node;
 };
 
 struct CommunityInfo {
@@ -69,6 +78,8 @@ struct DistCommunities {
 
   // will map neighboring nodes to communities
   std::unordered_map<int, int> gbl_vtx_to_comm_map;
+  // map a community to its size
+  std::unordered_map<int, int> comm_size;
 
   std::unordered_map<int,int> neighbor_degree;
 
@@ -80,16 +91,18 @@ struct DistCommunities {
   std::vector<int> neighbor_comms;
   std::unordered_map<int, double> edges_to_other_comms;
 
-  // a map of communities to the ranks that need updated community information 
-  std::unordered_map<int, std::unordered_set<int>> comm_subscribers;
-
   // maps local vertices to ranks that need updates on this vertex's community
-  std::unordered_map<int, std::unordered_set<int>> neighbor_subscribers;
+  std::unordered_map<int, std::unordered_set<int>> rank_to_border_vertices;
+  
+  // comm/vtx -> { rank -> int }
+  std::unordered_map<int, std::unordered_map<int, int>> vtx_rank_degree;
+  std::unordered_map<int, std::unordered_map<int, int>> comm_ref_count;
 
   DistCommunities(Graph& g);
   
-  void insert(int node, int community, int node_comm_degree);
-  void remove(int node, int community, int node_comm_degree);
+  double modularity();
+  void insert(int node, int community, int degree, int edges_within_comm, std::unordered_map<int, int>& rank_counts);
+  void remove(int node, int community, int degree, int edges_within_comm, std::unordered_map<int, int>& rank_counts);
   int compute_best_community(int node, int node_comm);
   void compute_neighbors(int node);
   double modularity_gain(int node, int comm, double node_comm_degree);
@@ -97,29 +110,20 @@ struct DistCommunities {
 
 
   void process_incoming_updates();
-  void process_local_removal(const CommunityUpdate& update);
-  void process_local_addition(const CommunityUpdate& update);
   void update_subscribers();
   void update_neighbors();
+  void receive_community_update(int source, MPI_Status& status, CommunityUpdate& update, std::vector<int>& rank_borders_buf);
+  void send_community_update(int dest, const CommunityUpdate& update);
 
-  double modularity();
+  // I/O
+  void write_communities_to_file(const std::string& directory);
+  void print_comm_ref_counts();
+  void print_comm_membership();
 
   Graph into_new_graph();
-
+  
   Graph& g;
 };
 
-
-struct DistCommunityUpdate {
-  int node;
-  int node_comm;
-  int best_comm;
-  double node_comm_degree;
-  double best_comm_degree;
-};
-
-
-void serialize(DistCommunityUpdate& data, std::vector<char>& buffer);
-void deserialize(std::vector<char>& buffer, DistCommunityUpdate& data);
 
 #endif

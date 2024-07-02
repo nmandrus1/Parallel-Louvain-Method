@@ -26,8 +26,10 @@ bool parse_args(int argc, char** argv, Args* args) {
 
 int run(int rank, int comm_size, Args args) {
   fs::path dir(args.infile);
+  auto out = dir;
+
   // files are named 0, 1, 2, ... n where rank n will access the file named n
-  dir = dir.append(std::to_string(rank));
+  dir.append(std::to_string(rank));
   // we just crash if these files don't exist 
   if(!fs::exists(dir)) {
     std::cerr << "Error: Preprocessed data file " << dir.string() << " does not exist for rank " << rank 
@@ -43,21 +45,12 @@ int run(int rank, int comm_size, Args args) {
   MPI_Barrier(MPI_COMM_WORLD);
   double new_mod = dist_comm.modularity();
 
+  out.append("level-1");
+  fs::create_directory(out);
+  dist_comm.write_communities_to_file(out);
+
   if(rank == 0) 
     std::cout << "Initial Modularity: " << init_mod << " and after one pass: " << new_mod << std::endl;
-
-
-  MPI_Barrier(MPI_COMM_WORLD);
-  for(int i = 0; i < comm_size; i++) {
-    if(rank == i) {
-        for(int v = g.rows.first; v < g.rows.second; v++)
-          std::cout << "RANK " << rank << ": Vtx " << v << " Community: " << dist_comm.gbl_vtx_to_comm_map[v] << "\n";
-        std::cout << std::endl;
-
-    }
-
-    MPI_Barrier(MPI_COMM_WORLD);
-  }
 
 
   // if(rank == 0) {
