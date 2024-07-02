@@ -53,13 +53,11 @@ void Communities::remove(int node, int community, int node_comm_degree) {
 // assignments.
 double Communities::modularity() {
   double q = 0.0;
-  double m2 = static_cast<double>(g.ecount) *
-              2; // Total weight of all edges in the graph, multiplied by 2.
+  double m2 = static_cast<double>(g.ecount) * 2; // Total weight of all edges in the graph, multiplied by 2.
 
   for (int i = 0; i < g.local_vcount; i++) {
     if (total[i] > 0)
-      q += in[i] / m2 -
-           (total[i] / m2) * (total[i] / m2); // Modularity formula as sum of
+      q += in[i] / m2 - (total[i] / m2) * (total[i] / m2); // Modularity formula as sum of
                                               // each community's contribution.
   }
 
@@ -192,7 +190,11 @@ Graph Communities::into_new_graph() {
   return Graph(edge_list); // Return a new graph representing the compressed
                            // community structure.
 }
-
+void Communities::print_comm_membership() {
+  // print comm_ref_counts
+  for (int v = g.rows.first; v < g.rows.second; v++) 
+     std::cout << "Vtx " << v << " Community: " << node_to_comm_map[v] << "\n";
+}
 // Constructor for the DistCommunities class.
 // Initializes internal data structures and sets up initial community
 // assignments where each node is its own community.
@@ -211,7 +213,7 @@ DistCommunities::DistCommunities(Graph &g) : g(g) {
   for (int v = g.rows.first; v < g.rows.second; v++) {
     for (auto n : g.neighbors(v)) {
       int owner = g.getRankOfOwner(n);
-      if (owner != g.info->rank) {
+      if (owner != g.info.rank) {
         msg_map[owner].push_back(v);
         msg_map[owner].push_back(g.degree(v));
       }
@@ -258,7 +260,7 @@ DistCommunities::DistCommunities(Graph &g) : g(g) {
       vtx_rank_degree[v][neighbor_owner]++;
       comm_ref_count[v][neighbor_owner]++;
 
-      if (neighbor_owner != g.info->rank)
+      if (neighbor_owner != g.info.rank)
         rank_to_border_vertices[neighbor_owner].insert(v);
 
       if (gbl_vtx_to_comm_map.contains(n))
@@ -285,6 +287,8 @@ void DistCommunities::insert(int node, int community, int degree,
   if(comm_size[community] == 1 | comm_size[community] == 0) in[community] = 0;
 
   // only update reference counts if we own this row
+  // NOTE: g.in_row(node) should be g.in_row(community) but for some reason
+  // this causes an infinite loop. The bug is being worked on separately
   if(g.in_row(node)) {
     for (auto &[rank, count] : rank_counts)
       comm_ref_count[community][rank] += count;
@@ -302,6 +306,8 @@ void DistCommunities::remove(int node, int community, int degree,
   in[community] -= 2 * edges_within_comm;
   if(comm_size[community] == 1 | comm_size[community] == 0) in[community] = 0;
 
+  // NOTE: g.in_row(node) should be g.in_row(community) but for some reason
+  // this causes an infinite loop. The bug is being worked on separately
   if(g.in_row(node)) {
     for (auto &[rank, count] : rank_counts)
       comm_ref_count[community][rank] -= count;
@@ -338,7 +344,7 @@ bool DistCommunities::iterate() {
   std::iota(vertices.begin(), vertices.end(), g.rows.first);
 
   std::default_random_engine eng;
-  eng.seed(g.info->rank);
+  eng.seed(g.info.rank);
 
   
   while (true) {
@@ -348,12 +354,12 @@ bool DistCommunities::iterate() {
     for (int vtx: vertices) {
       int vtx_comm = gbl_vtx_to_comm_map[vtx];
 
-      // std::cout << "RANK " << g.info->rank << ": Computing neighbors" << std::endl;
+      // std::cout << "RANK " << g.info.rank << ": Computing neighbors" << std::endl;
       compute_neighbors(vtx); // Update the weights to all neighboring
                                // communities of the node.
 
       // Temporarily remove the node from its current community.
-      std::cout << "RANK " << g.info->rank << ": Removing vtx " << vtx << " from comm " << vtx_comm << std::endl;
+      std::cout << "RANK " << g.info.rank << ": Removing vtx " << vtx << " from comm " << vtx_comm << std::endl;
 
       remove(vtx, vtx_comm, g.degree(vtx), edges_to_other_comms[vtx_comm],
              vtx_rank_degree[vtx]);
@@ -361,13 +367,13 @@ bool DistCommunities::iterate() {
       // Determine the best community for this node based on potential
       // modularity gain.
 
-      // std::cout << "RANK " << g.info->rank << ": computing best comm" << std::endl;
+      // std::cout << "RANK " << g.info.rank << ": computing best comm" << std::endl;
 
       auto best_comm = compute_best_community(vtx, vtx_comm);
 
       // change communities
       if(best_comm != vtx_comm) {
-        // std::cout << "RANK " << g.info->rank << ": best comm = " << best_comm << std::endl;
+        // std::cout << "RANK " << g.info.rank << ": best comm = " << best_comm << std::endl;
 
         // calculate the ranks that own the old and new communities
         int old_comm_owner = g.getRankOfOwner(vtx_comm);
@@ -382,14 +388,14 @@ bool DistCommunities::iterate() {
                                   edges_to_other_comms[best_comm],
                                   (int)vtx_rank_degree[vtx].size()};
 
-        // std::cout << "RANK " << g.info->rank << ": Communicating removal/addition \t old: " << old_comm_owner << " new: " << new_comm_owner << std::endl;
+        // std::cout << "RANK " << g.info.rank << ": Communicating removal/addition \t old: " << old_comm_owner << " new: " << new_comm_owner << std::endl;
 
-        if (old_comm_owner != g.info->rank)
+        if (old_comm_owner != g.info.rank)
           send_community_update(old_comm_owner, update);
         // No else required since if the old owner was this rank then it was
         // removed properly by the remove() call
 
-        if (new_comm_owner != g.info->rank) {
+        if (new_comm_owner != g.info.rank) {
           update.type = CommunityUpdate::Addition;
           send_community_update(new_comm_owner, update);
         }
@@ -400,7 +406,7 @@ bool DistCommunities::iterate() {
       // NOTE: subject to change if vertex rejections are implemented
       insert(vtx, best_comm, g.degree(vtx), edges_to_other_comms[best_comm], vtx_rank_degree[vtx]);
 
-      if(g.info->rank == 1 && gbl_vtx_to_comm_map[6] == gbl_vtx_to_comm_map[7]) {
+      if(g.info.rank == 1 && gbl_vtx_to_comm_map[6] == gbl_vtx_to_comm_map[7]) {
         std::cout << "!";
       }
       MPI_Barrier(MPI_COMM_WORLD);
@@ -425,7 +431,7 @@ bool DistCommunities::iterate() {
     print_comm_membership();
 
     auto mod = modularity();
-    if (g.info->rank == 0)
+    if (g.info.rank == 0)
       std::cout << "Modularity: " << mod << std::endl;
 
   }
@@ -476,7 +482,7 @@ void DistCommunities::update_subscribers() {
   for (auto &[comm, ranks] : comm_ref_count) {
     CommunityInfo updated_info = {comm, in[comm], total[comm]};
     for (auto &[rank, count] : ranks) {
-      if(rank == g.info->rank) continue;
+      if(rank == g.info.rank) continue;
 
       MPI_Send(&updated_info, sizeof(CommunityInfo), MPI_BYTE, rank,
                MPI_COMM_SYNC, MPI_COMM_WORLD);
@@ -624,72 +630,104 @@ double DistCommunities::modularity_gain(int node, int comm,
   return (dnc - totc * degc / m2); // Modularity gain formula.
 }
 
+// Renumber the communities globally by gathering all unique comm ids from all processes to rank 0,
+// renumbering them, and then sending out new comm ids to the comm owners
+void DistCommunities::renumber_communities() {
+  int world_rank, world_size;
+  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+  // Step 1: Collect all local communities
+  std::unordered_set<int> local_communities;
+  for (auto &entry : gbl_vtx_to_comm_map) {
+      local_communities.insert(entry.second);
+  }
+
+  // Step 2: Gather all communities at root
+  std::vector<int> all_communities;
+  if (world_rank == 0) {
+      // Gather sizes first
+      std::vector<int> all_sizes(world_size);
+      int local_size = local_communities.size();
+      MPI_Gather(&local_size, 1, MPI_INT, all_sizes.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+      // Prepare for gathering all communities
+      std::vector<int> displacements(world_size);
+      int total_size = 0;
+      for (int i = 0; i < world_size; ++i) {
+          displacements[i] = total_size;
+          total_size += all_sizes[i];
+      }
+      all_communities.resize(total_size);
+
+      // Gather all communities
+      std::vector<int> local_comm_vec(local_communities.begin(), local_communities.end());
+      MPI_Gatherv(local_comm_vec.data(), local_size, MPI_INT, all_communities.data(), all_sizes.data(), displacements.data(), MPI_INT, 0, MPI_COMM_WORLD);
+  } else {
+      // Non-root ranks send their data
+      std::vector<int> local_comm_vec(local_communities.begin(), local_communities.end());
+      int local_size = local_comm_vec.size();
+      MPI_Gather(&local_size, 1, MPI_INT, nullptr, 0, MPI_INT, 0, MPI_COMM_WORLD);
+      MPI_Gatherv(local_comm_vec.data(), local_size, MPI_INT, nullptr, nullptr, nullptr, MPI_INT, 0, MPI_COMM_WORLD);
+  }
+
+  // Step 3: Root creates new community numbers
+  std::unordered_map<int, int> new_comm_mapping;
+  if (world_rank == 0) {
+      std::sort(all_communities.begin(), all_communities.end());
+      all_communities.erase(unique(all_communities.begin(), all_communities.end()), all_communities.end());
+      int new_comm_id = 0;
+      for (int comm : all_communities) {
+          new_comm_mapping[comm] = new_comm_id++;
+      }
+
+      // Serialize the map for broadcasting
+      std::vector<int> flat_data;
+      for (const auto &pair : new_comm_mapping) {
+          flat_data.push_back(pair.first);
+          flat_data.push_back(pair.second);
+      }
+
+      // Broadcast the size of the map
+      int map_size = flat_data.size();
+      MPI_Bcast(&map_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+      // Broadcast the flat data
+      flat_data.resize(map_size);
+      MPI_Bcast(flat_data.data(), map_size, MPI_INT, 0, MPI_COMM_WORLD);
+  } else {
+      // Non-root ranks receive the mapping
+      int map_size;
+      MPI_Bcast(&map_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+      std::vector<int> flat_data(map_size);
+      MPI_Bcast(flat_data.data(), map_size, MPI_INT, 0, MPI_COMM_WORLD);
+
+      for (int i = 0; i < map_size; i += 2) {
+          new_comm_mapping[flat_data[i]] = flat_data[i+1];
+      }
+  }
+
+  // Step 4: Update local community numbers
+  for (auto &entry : gbl_vtx_to_comm_map) 
+    entry.second = new_comm_mapping[entry.second];
+}
+
 // Constructs a new graph based on the current community assignments.
-// Graph DistCommunities::into_new_graph() {
-//   std::unordered_map<int, std::vector<int>> map;
+Graph DistCommunities::reconstruct_graph() {
+  // maps communites and its neighbors
+  // neighbor information will be sent to the owner community
+  std::vector<std::pair<int, int>> edge_list;
 
-//   for (int i = 0; i < gbl_vtx_to_comm_map.size(); i++) {
-//     map[gbl_vtx_to_comm_map[i]].push_back(i);
-//   }
+  for (int vtx = g.rows.first; vtx < g.rows.second; vtx++) {
+    int comm = gbl_vtx_to_comm_map[vtx];
+    compute_neighbors(vtx);
+    for(auto neighbor: neighbor_comms)
+      edge_list.push_back(std::make_pair(comm, neighbor));
+  }
 
-//   // Renumber communities to be consecutive starting from 0.
-//   std::fill(gbl_vtx_to_comm_map.begin(), gbl_vtx_to_comm_map.end(), -1);
-//   int new_comm_number = 0;
-//   for (auto pair : map) {
-//     for (auto node : pair.second)
-//       gbl_vtx_to_comm_map[node] = new_comm_number;
-//     new_comm_number++;
-//   }
-
-//   // Create new edges based on community connections.
-//   std::vector<std::unordered_set<int>> comm_edges(new_comm_number);
-//   for (int node = 0; node < gbl_vtx_to_comm_map.size(); node++) {
-//     int comm = gbl_vtx_to_comm_map[node];
-//     for (auto neighbor : g.neighbors(node))
-//       comm_edges[comm].insert(gbl_vtx_to_comm_map[neighbor]);
-//   }
-
-//   std::vector<std::pair<int, int>> edge_list;
-//   for (int node = 0; node < comm_edges.size(); node++) {
-//     for (auto neighbor : comm_edges[node]) {
-//       edge_list.push_back(std::make_pair(node, neighbor));
-//     }
-//   }
-
-//   return Graph(edge_list); // Return a new graph representing the compressed
-//                            // community structure.
-// }
-
-// void serialize(DistCommunityUpdate& data, std::vector<char>& buffer) {
-//     size_t int_size = sizeof(int);
-//     size_t double_size = sizeof(double);
-//     buffer.resize(3 * int_size + 2 * double_size);
-//     char* ptr = buffer.data();
-
-//     // Copy integers
-//     std::memcpy(ptr, &data.node, int_size); ptr += int_size;
-//     std::memcpy(ptr, &data.node_comm, int_size); ptr += int_size;
-//     std::memcpy(ptr, &data.best_comm, int_size); ptr += int_size;
-
-//     // Copy doubles
-//     std::memcpy(ptr, &data.node_comm_degree, double_size); ptr +=
-//     double_size; std::memcpy(ptr, &data.best_comm_degree, double_size);
-// }
-
-// void deserialize(std::vector<char>& buffer, DistCommunityUpdate& data) {
-//     const char* ptr = buffer.data();
-//     size_t int_size = sizeof(int);
-//     size_t double_size = sizeof(double);
-
-//     // Copy integers
-//     std::memcpy(&data.node, ptr, int_size); ptr += int_size;
-//     std::memcpy(&data.node_comm, ptr, int_size); ptr += int_size;
-//     std::memcpy(&data.best_comm, ptr, int_size); ptr += int_size;
-
-//     // Copy doubles
-//     std::memcpy(&data.node_comm_degree, ptr, double_size); ptr +=
-//     double_size; std::memcpy(&data.best_comm_degree, ptr, double_size);
-// }
+  return Graph(edge_list); // Return a new graph representing the compressed
+                           // community structure.
+}
 
 void DistCommunities::send_community_update(int dest, const CommunityUpdate &update) {
     int position = 0;
@@ -721,7 +759,7 @@ void DistCommunities::send_community_update(int dest, const CommunityUpdate &upd
 
     MPI_Send(buffer, position, MPI_PACKED, dest, MPI_DATA_TAG, MPI_COMM_WORLD);
 
-    // std::cout << "RANK " << g.info->rank << ": Sending packed update to rank " << dest << std::endl;
+    // std::cout << "RANK " << g.info.rank << ": Sending packed update to rank " << dest << std::endl;
 }
 
 
@@ -758,9 +796,9 @@ void DistCommunities::receive_community_update(
 void DistCommunities::print_comm_ref_counts() {
 
   // print comm_ref_counts
-  for (int i = 0; i < g.info->comm_size; i++) {
-    if (g.info->rank == i) {
-      std::cout << "RANK " << g.info->rank << ": Community Reference Counts\n";
+  for (int i = 0; i < g.info.comm_size; i++) {
+    if (g.info.rank == i) {
+      std::cout << "RANK " << g.info.rank << ": Community Reference Counts\n";
       for (int v = g.rows.first; v < g.rows.second; v++) {
         std::cout << "\tCommunity " << v << "\n";
         for (auto &[rank, count] : comm_ref_count[v])
@@ -776,10 +814,10 @@ void DistCommunities::print_comm_ref_counts() {
 void DistCommunities::print_comm_membership() {
 
   // print comm_ref_counts
-  for (int i = 0; i < g.info->comm_size; i++) {
-    if (g.info->rank == i) {
+  for (int i = 0; i < g.info.comm_size; i++) {
+    if (g.info.rank == i) {
       for (int v = g.rows.first; v < g.rows.second; v++) 
-         std::cout << "RANK " << g.info->rank << ": Vtx " << v << " Community: " << gbl_vtx_to_comm_map[v] << "\n";
+         std::cout << "RANK " << g.info.rank << ": Vtx " << v << " Community: " << gbl_vtx_to_comm_map[v] << "\n";
       std::cout << std::endl;
     }
 
@@ -790,7 +828,7 @@ void DistCommunities::print_comm_membership() {
 void DistCommunities::write_communities_to_file(const std::string& directory) {
     // Create a filename based on the rank
     std::ostringstream filename;
-    filename << directory << "/" << g.info->rank << ".txt";
+    filename << directory << "/" << g.info.rank << ".txt";
 
     // Open the output file stream
     std::ofstream outfile(filename.str());
@@ -810,7 +848,7 @@ void DistCommunities::write_communities_to_file(const std::string& directory) {
     // Synchronize after writing to ensure all files are written
     MPI_Barrier(MPI_COMM_WORLD);
 
-    if (g.info->rank == 0) {
+    if (g.info.rank == 0) {
         std::cout << "All ranks have finished writing community data to " << directory << std::endl;
     }
 }

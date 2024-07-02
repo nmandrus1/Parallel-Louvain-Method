@@ -8,7 +8,7 @@
 #include <sstream>
 #include <iostream>
 
-ProcInfo* ProcInfo::instance = nullptr;
+// ProcInfo* ProcInfo::instance = nullptr;
 
 ProcInfo::ProcInfo() {
   int initialized;

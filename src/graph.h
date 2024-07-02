@@ -5,6 +5,8 @@
 #include <utility>
 #include <vector>
 #include <cassert>
+#include <map>
+#include <set>
 
 #include "util.h"
 
@@ -12,9 +14,6 @@
 class Graph {
 
   public:
-  // Initialize to create an empty graph with no vertices.}
-  Graph() : local_vcount(0), global_vcount(0), ecount(0), data(), info(ProcInfo::getInstance()), rows(), output(false) {}
-  
   // constructor creates adj. mat. with vcount^2 elements in data vector
   Graph(size_t vcount);
   // creates graph from list of edges and a vcount
@@ -39,11 +38,10 @@ class Graph {
   // Assuming global indexing
   int getRankOfOwner(int v) const { return v / local_vcount; }
   int makeLocal(int v) const { return v % local_vcount; }
-  int localRowToGlobal(int v) const { assert(v < local_vcount); return v + (info->rank * local_vcount); }
+  int localRowToGlobal(int v) const { assert(v < local_vcount); return v + (info.rank * local_vcount); }
   
   // print adj. mat. 
   void print_graph() const;
-  void toggle_output() { output = true; }
 
   // CSR 
   std::vector<int> data;
@@ -56,11 +54,16 @@ class Graph {
   // number of vertices
   size_t ecount;
   // info on MPI Processes/Topology
-  const ProcInfo* info;
+  ProcInfo info;
 
   // start and end (inclusive) ownership for rows
   std::pair<int, int> rows;
-  bool output;
+
+  private: 
+    // convert adj_list into CSR
+    void sparsify(const std::map<int, std::set<unsigned>>& adj_list);
+    void initializeFromAdjList(const std::map<int, std::set<unsigned>>& adj_list);
+    void distributedGraphInit(const std::vector<std::pair<int, int>>& edge_list, ProcInfo info);
 };
 
 

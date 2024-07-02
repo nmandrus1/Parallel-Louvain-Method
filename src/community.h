@@ -33,6 +33,7 @@ struct Communities {
   double modularity_gain(int node, int comm, double node_comm_degree);
   bool iterate();
 
+  void print_comm_membership();
 
   double modularity();
 
@@ -120,9 +121,12 @@ struct DistCommunities {
   void print_comm_ref_counts();
   void print_comm_membership();
 
-  Graph into_new_graph();
+  Graph reconstruct_graph();
   
   Graph& g;
+
+  private: 
+    void renumber_communities();
 };
 
 

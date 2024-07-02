@@ -5,99 +5,68 @@
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
-#include <iterator>
-#include <map>
 #include <mpi.h>
-#include <set>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
+#include <map>
+#include <set>
 
 #include <utility>
 
+void Graph::sparsify(const std::map<int, std::set<unsigned>>& adj_list) {
+  ecount = 0;
+  row_index.push_back(0);
+  for (const auto& entry : adj_list) {
+      for (int neighbor : entry.second) {
+          column_index.push_back(neighbor);
+          data.push_back(1); // assuming all edges have weight 1 for simplicity
+      }
+      row_index.push_back(column_index.size());
+      ecount += entry.second.size();
+  }
+}
+
+void Graph::initializeFromAdjList(const std::map<int, std::set<unsigned>>& adj_list) {
+  local_vcount = adj_list.size();
+  global_vcount = adj_list.size();
+  rows.first = 0;
+  rows.second = local_vcount;
+  sparsify(adj_list);
+}
+
 // default constructor
-Graph::Graph(size_t vcount) : Graph() {
-  this->local_vcount = vcount;
+Graph::Graph(size_t vcount) : local_vcount(vcount), global_vcount(vcount) {
   this->data.resize(vcount * vcount, 0);
 }
 
-Graph::Graph(const std::vector<std::pair<int, int>> edge_list) : Graph() {
+Graph::Graph(const std::vector<std::pair<int, int>> edge_list) {
   std::map<int, std::set<unsigned>> adj_list;
-  ecount = edge_list.size();
-
-  for (auto pair : edge_list) {
-    adj_list[pair.first].insert((unsigned)pair.second);
-    adj_list[pair.second].insert((unsigned)pair.first);
-  }
-
-  local_vcount = adj_list.size();
-  global_vcount = adj_list.size();
-
-  rows.first = 0;
-  rows.second = local_vcount;
-
-  int nnz = 0;
-  row_index.push_back(nnz);
-
-  for (auto entry : adj_list) {
-    data.insert(data.end(), entry.second.size(), 1);
-    column_index.insert(column_index.end(), std::begin(entry.second),
-                        std::end(entry.second));
-    nnz += entry.second.size();
-    row_index.push_back(nnz);
-  }
-}
-
-// construct a graph from an edge list
-Graph::Graph(const std::vector<std::pair<int, int>> &edge_list,
-             const size_t vcount)
-    : Graph() {
-
-  this->ecount = edge_list.size();
-  this->local_vcount = vcount;
-  std::vector<bool> adj_mat(vcount * vcount, 0);
-
-  // loop over every edge pair and add it to the graph
-  for (auto pair : edge_list) {
-    if (pair.first == pair.second)
-      continue;
-
-    // 1-d indexing
-    adj_mat[pair.first * this->local_vcount + pair.second] = true;
-    adj_mat[pair.second * this->local_vcount + pair.first] = true;
-  }
-
-  // sparsify
-  int nnz = 0;
-  this->row_index.push_back(nnz);
-
-  for (unsigned i = 0; i < vcount; i++) {
-    for (unsigned j = 0; j < vcount; j++) {
-      int entry = adj_mat[i * vcount + j];
-      if (entry != 0) {
-        data.push_back(entry);
-        column_index.push_back(j);
-        nnz += 1;
-      }
+    for (auto& pair : edge_list) {
+        adj_list[pair.first].insert(pair.second);
+        adj_list[pair.second].insert(pair.first);
     }
-
-    this->row_index.push_back(nnz);
-  }
+    initializeFromAdjList(adj_list);
 }
 
-Graph::Graph(const std::string &fname, bool distributed) : Graph() {
+
+Graph::Graph(const std::string &fname, bool distributed) {
   auto edges = edge_list_from_file(fname);
 
   if (distributed == false) {
     *this = Graph(edges);
-    return;
-  }
+  } else {
+    auto info = ProcInfo();
+    distributedGraphInit(edges, info);
+  } 
+}
 
-  
 
+void Graph::distributedGraphInit(const std::vector<std::pair<int, int>>& edges, ProcInfo info) {
   // if this is a distributed graph, we need to calculate which edges belong
   // where For now we assume that all edges are numbered 0 to n with no gaps map
   // ranks to the edges that need to go to that rank
+
+  info = info;
 
   int max_vtx = 0;
   for (auto edge : edges)
@@ -109,13 +78,13 @@ Graph::Graph(const std::string &fname, bool distributed) : Graph() {
   MPI_Allreduce(&max_vtx, &max_vtx, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
   // we have a vcount x vcount adj matrix locally
-  // globally, info->width is the width of the process grid
-  // so with 4 mpi procs info->width = 2 and the total number of
+  // globally, info.width is the width of the process grid
+  // so with 4 mpi procs info.width = 2 and the total number of
   // vertices is (max_vtx + 1) / 2 = 16/2 -> 8
   global_vcount = max_vtx + 1;
-  local_vcount = global_vcount / info->comm_size;
+  local_vcount = global_vcount / info.comm_size;
 
-  rows.first = info->rank * local_vcount;
+  rows.first = info.rank * local_vcount;
   rows.second = rows.first + local_vcount;
 
   int edge_count = edges.size();
@@ -140,21 +109,21 @@ Graph::Graph(const std::string &fname, bool distributed) : Graph() {
   // store the length, in number of integers, that this proc is sending to each
   // rank
   int total_ints_to_send = 0;
-  std::vector<int> send_buf(info->comm_size, 0);
+  std::vector<int> send_buf(info.comm_size, 0);
   for (auto entry : msg_map) {
     send_buf[entry.first] = entry.second.size();
     total_ints_to_send += entry.second.size();
   }
 
   // send 1 int to each proc
-  std::vector<int> counts_send(info->comm_size, 1);
+  std::vector<int> counts_send(info.comm_size, 1);
 
   // displacement for each proc is its own rank
-  std::vector<int> displs_send(info->comm_size);
-  for (int i = 0; i < info->comm_size; i++)
+  std::vector<int> displs_send(info.comm_size);
+  for (int i = 0; i < info.comm_size; i++)
     displs_send[i] = i;
 
-  std::vector<int> recv_buf(info->comm_size);
+  std::vector<int> recv_buf(info.comm_size);
   // counts_recv is the same as counts_send
   // displ_recv is the same as displ_send
   MPI_Request req;
@@ -168,7 +137,7 @@ Graph::Graph(const std::string &fname, bool distributed) : Graph() {
   std::fill(counts_send.begin(), counts_send.end(), 0);
 
   int send_displ = 0;
-  for (int rank = 0; rank < info->comm_size; rank++) {
+  for (int rank = 0; rank < info.comm_size; rank++) {
     auto entry = msg_map.find(rank);
     if (entry == msg_map.end())
       continue;
@@ -183,8 +152,8 @@ Graph::Graph(const std::string &fname, bool distributed) : Graph() {
   }
 
   int total_ints_to_recv = 0;
-  std::vector<int> recv_counts(info->comm_size), recv_displ(info->comm_size);
-  for (int rank = 0; rank < info->comm_size; rank++) {
+  std::vector<int> recv_counts(info.comm_size), recv_displ(info.comm_size);
+  for (int rank = 0; rank < info.comm_size; rank++) {
     recv_counts[rank] = recv_buf[rank];
 
     recv_displ[rank] = total_ints_to_recv;
@@ -200,40 +169,17 @@ Graph::Graph(const std::string &fname, bool distributed) : Graph() {
                  recv_displ.data(), MPI_INT, MPI_COMM_WORLD, &req2);
   MPI_Wait(&req2, MPI_STATUS_IGNORE);
 
-  edges.resize(total_ints_to_recv / 2);
-  edges.clear();
+  std::map<int, std::set<unsigned>> adj_list;
 
   // Deserialize recv_data back into a usable format, e.g., updating
   // candidate_parents or similar structures
   for (int i = 0; i < total_ints_to_recv; i += 2) {
     int vertex = recv_buf[i];
-    int parent = recv_buf[i + 1];
-    edges.push_back(std::make_pair(makeLocal(vertex), parent));
+    int neighbor = recv_buf[i + 1];
+    adj_list[vertex].insert(neighbor);
   }
 
-  // this->ecount = edges.size();
-  std::vector<bool> adj_mat(local_vcount * global_vcount, 0);
-
-  // loop over every edge pair and add it to the graph
-  for (auto pair : edges)
-    adj_mat[pair.first * global_vcount + pair.second] = true;
-
-  // sparsify
-  int nnz = 0;
-  row_index.push_back(nnz);
-
-  for (unsigned i = 0; i < local_vcount; i++) {
-    for (unsigned j = 0; j < global_vcount; j++) {
-      int entry = adj_mat[i * global_vcount + j];
-      if (entry != 0) {
-        data.push_back(entry);
-        column_index.push_back(j);
-        nnz += 1;
-      }
-    }
-
-    row_index.push_back(nnz);
-  }
+  initializeFromAdjList(adj_list);
 }
 
 // get the list of vertices vert is connected to
