@@ -103,7 +103,8 @@ struct DistCommunities {
   double modularity();
   void insert(int node, int community, int degree, int edges_within_comm, std::unordered_map<int, int>& rank_counts);
   void remove(int node, int community, int degree, int edges_within_comm, std::unordered_map<int, int>& rank_counts);
-  int compute_best_community(int node, int node_comm);
+  // int compute_best_community(int node, int node_comm);
+  int compute_best_community(int node, int node_comm, double temperature);
   void compute_neighbors(int node);
   double modularity_gain(int node, int comm, double node_comm_degree);
   bool iterate();
