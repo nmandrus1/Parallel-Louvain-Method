@@ -109,8 +109,7 @@ int Communities::compute_best_community(int node, int node_comm) {
   int best_comm = node_comm;
   double best_increase = 0.0;
   for (auto neighbor_comm : neighbor_comms) {
-    double increase = modularity_gain(node, neighbor_comm,
-                                      edges_to_other_comms[neighbor_comm]);
+    double increase = modularity_gain(node, neighbor_comm, edges_to_other_comms[neighbor_comm]);
     if (increase > best_increase) {
       best_comm = neighbor_comm;
       best_increase = increase;
@@ -125,6 +124,10 @@ void Communities::compute_neighbors(int node) {
   neighbor_comms.clear();
   std::fill(edges_to_other_comms.begin(), edges_to_other_comms.end(), -1.0);
   edges_to_other_comms[node] = 0;
+
+  int node_comm = node_to_comm_map[node];
+  edges_to_other_comms[node_comm] = 0;
+  neighbor_comms.push_back(node_comm);
 
   for (int neighbor : g.neighbors(node)) {
     int neighbor_comm = node_to_comm_map[neighbor];
@@ -288,9 +291,7 @@ void DistCommunities::insert(int node, int community, int degree,
   // if(comm_size[community] == 1 | comm_size[community] == 0) in[community] = 0;
 
   // only update reference counts if we own this row
-  // NOTE: g.in_row(node) should be g.in_row(community) but for some reason
-  // this causes an infinite loop. The bug is being worked on separately
-  if(g.in_row(node)) {
+  if(g.in_row(community)) {
     for (auto &[rank, count] : rank_counts)
       comm_ref_count[community][rank] += count;
   }
@@ -307,9 +308,7 @@ void DistCommunities::remove(int node, int community, int degree,
   in[community] -= 2 * edges_within_comm;
   // if(comm_size[community] == 1 | comm_size[community] == 0) in[community] = 0;
 
-  // NOTE: g.in_row(node) should be g.in_row(community) but for some reason
-  // this causes an infinite loop. The bug is being worked on separately
-  if(g.in_row(node)) {
+  if(g.in_row(community)) {
     for (auto &[rank, count] : rank_counts)
       comm_ref_count[community][rank] -= count;
   }
@@ -347,15 +346,22 @@ bool DistCommunities::iterate() {
   std::default_random_engine eng;
   eng.seed(g.info.rank);
 
+  // negative for exponential decay of temperature as a function of the number of 
+  // iterations over every vertex. Higher the number of iterations, the less likely 
+  // it should be for vertices to move around
+  int iteration = -1;
+  double temperature;
   
   while (true) {
+    temperature = std::exp(static_cast<double>(iteration));
+
     prev_num_moves = total_num_moves;
     std::shuffle(vertices.begin(), vertices.end(), eng);
 
     for (int vtx: vertices) {
       int vtx_comm = gbl_vtx_to_comm_map[vtx];
 
-      // std::cout << "RANK " << g.info.rank << ": Computing neighbors" << std::endl;
+      // std::cout << "RANK " << g.info->rank << ": Computing neighbors" << std::endl;
       compute_neighbors(vtx); // Update the weights to all neighboring
                                // communities of the node.
 
@@ -370,7 +376,7 @@ bool DistCommunities::iterate() {
 
       // std::cout << "RANK " << g.info.rank << ": computing best comm" << std::endl;
 
-      auto best_comm = compute_best_community(vtx, vtx_comm);
+      auto best_comm = compute_best_community(vtx, vtx_comm, temperature);
 
       // change communities
       if(best_comm != vtx_comm) {
@@ -407,9 +413,6 @@ bool DistCommunities::iterate() {
       // NOTE: subject to change if vertex rejections are implemented
       insert(vtx, best_comm, g.degree(vtx), edges_to_other_comms[best_comm], vtx_rank_degree[vtx]);
 
-      if(g.info.rank == 1 && gbl_vtx_to_comm_map[6] == gbl_vtx_to_comm_map[7]) {
-        std::cout << "!";
-      }
       MPI_Barrier(MPI_COMM_WORLD);
 
       // recieve updates from remote process about nodes joining local community
@@ -433,8 +436,10 @@ bool DistCommunities::iterate() {
 
     auto mod = modularity();
     if (g.info.rank == 0)
-      std::cout << "Modularity: " << mod << std::endl;
+      std::cout << "Modularity: " << mod  << "\nTemp: " << temperature << std::endl;
 
+    // negative for exponential decay, see variable declaration
+    iteration -= 1;
   }
 }
 
@@ -444,6 +449,7 @@ void DistCommunities::process_incoming_updates() {
   CommunityUpdate update;
   std::vector<int> buf;
   std::unordered_map<int, int> rank_counts;
+
 
   // Continue processing as long as there are messages
   while (true) {
@@ -582,13 +588,13 @@ void DistCommunities::update_neighbors() {
 
 // Given a node and its current community, computes the best community for this
 // node that would increase the modularity the most.
-int DistCommunities::compute_best_community(int node, int node_comm) {
+int DistCommunities::compute_best_community(int node, int node_comm, double temperature) {
   int best_comm = node_comm;
   double best_increase = 0.0;
   for (auto neighbor_comm : neighbor_comms) {
-    double increase = modularity_gain(node, neighbor_comm,
-                                      edges_to_other_comms[neighbor_comm]);
-    if (increase > best_increase) {
+    double increase = modularity_gain(node, neighbor_comm, edges_to_other_comms[neighbor_comm]);
+
+    if (increase > best_increase && std::abs(best_increase - increase) > temperature) {
       best_comm = neighbor_comm;
       best_increase = increase;
     }
@@ -603,6 +609,10 @@ void DistCommunities::compute_neighbors(int node) {
   neighbor_comms.clear();
   edges_to_other_comms.clear();
   // edges_to_other_comms[gbl_vtx_to_comm_map[node]] = 0;
+
+  int node_comm = gbl_vtx_to_comm_map[node];
+  edges_to_other_comms[node_comm] = 0;
+  neighbor_comms.push_back(node_comm);
 
   for (int neighbor : g.neighbors(node)) {
     int neighbor_comm = gbl_vtx_to_comm_map[neighbor];
