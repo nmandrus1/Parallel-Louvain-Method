@@ -24,7 +24,7 @@ class Graph {
   Graph(const std::string& fname, bool distributed);
 
   // get the list of vertices vertex is connected to (local indexing)
-  std::vector<int> neighbors(const int vert) const;
+  std::vector<unsigned> neighbors(const int vert) const;
   inline int degree(int v) const { 
     assert(in_row(v)); 
     int vert = makeLocal(v);

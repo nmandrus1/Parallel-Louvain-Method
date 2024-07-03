@@ -174,31 +174,23 @@ void Graph::distributedGraphInit(const std::vector<std::pair<int, int>>& edges, 
   // Deserialize recv_data back into a usable format, e.g., updating
   // candidate_parents or similar structures
   for (int i = 0; i < total_ints_to_recv; i += 2) {
-    int vertex = recv_buf[i];
+    int vertex = makeLocal(recv_buf[i]);
     int neighbor = recv_buf[i + 1];
     adj_list[vertex].insert(neighbor);
   }
 
-  initializeFromAdjList(adj_list);
+  sparsify(adj_list);
 }
 
 // get the list of vertices vert is connected to
-std::vector<int> Graph::neighbors(const int v) const {
+std::vector<unsigned> Graph::neighbors(const int v) const {
   assert(in_row(v));
   int vert = makeLocal(v);
-
-
-  std::vector<int> ret;
 
   unsigned row_start = this->row_index[vert];
   unsigned row_end = this->row_index[vert + 1];
 
-  // loop over every vertex and push back those vert is adjacent to
-  for (unsigned i = row_start; i < row_end; i++) {
-    ret.push_back(this->column_index[i]);
-  }
-
-  return ret;
+  return std::vector(column_index.begin() + row_start, column_index.begin() + row_end);
 }
 
 void Graph::print_graph() const {

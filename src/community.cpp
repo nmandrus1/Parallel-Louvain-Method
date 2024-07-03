@@ -124,6 +124,7 @@ int Communities::compute_best_community(int node, int node_comm) {
 void Communities::compute_neighbors(int node) {
   neighbor_comms.clear();
   std::fill(edges_to_other_comms.begin(), edges_to_other_comms.end(), -1.0);
+  edges_to_other_comms[node] = 0;
 
   for (int neighbor : g.neighbors(node)) {
     int neighbor_comm = node_to_comm_map[neighbor];
@@ -284,7 +285,7 @@ void DistCommunities::insert(int node, int community, int degree,
   comm_size[community]++;
   total[community] += degree;
   in[community] += 2 * edges_within_comm;
-  if(comm_size[community] == 1 | comm_size[community] == 0) in[community] = 0;
+  // if(comm_size[community] == 1 | comm_size[community] == 0) in[community] = 0;
 
   // only update reference counts if we own this row
   // NOTE: g.in_row(node) should be g.in_row(community) but for some reason
@@ -304,7 +305,7 @@ void DistCommunities::remove(int node, int community, int degree,
   comm_size[community]--;
   total[community] -= degree;
   in[community] -= 2 * edges_within_comm;
-  if(comm_size[community] == 1 | comm_size[community] == 0) in[community] = 0;
+  // if(comm_size[community] == 1 | comm_size[community] == 0) in[community] = 0;
 
   // NOTE: g.in_row(node) should be g.in_row(community) but for some reason
   // this causes an infinite loop. The bug is being worked on separately
@@ -601,6 +602,7 @@ int DistCommunities::compute_best_community(int node, int node_comm) {
 void DistCommunities::compute_neighbors(int node) {
   neighbor_comms.clear();
   edges_to_other_comms.clear();
+  // edges_to_other_comms[gbl_vtx_to_comm_map[node]] = 0;
 
   for (int neighbor : g.neighbors(node)) {
     int neighbor_comm = gbl_vtx_to_comm_map[neighbor];
