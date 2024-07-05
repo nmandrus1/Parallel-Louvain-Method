@@ -30,13 +30,21 @@
 include_directories(${MPI_INCLUDE_PATH})
 
 # Include GPTL paths
-include_directories($ENV{GPTL}/include)
+if(ENABLE_PROFILING)
+  include_directories($ENV{GPTL}/include)
+  link_directoryies($ENV{GPTL}/lib)
+  add_definitions(-DPROFILE_FNS)
+endif()
 
 add_executable(graph500 main_distributed_community.cpp)
 add_executable(comm main_community.cpp)
 
 add_library(graphlib graph.h graph.cpp util.h util.cpp community.h community.cpp)
-target_link_libraries(graphlib -L$ENV{GPTL}/lib -lgptl -lunwind)
+
+if(ENABLE_PROFILING)
+  target_link_libraries(graphlib -L$ENV{GPTL}/lib -lgptl -lunwind)
+  target_compile_options(graphlib PRIVATE -rdynamic)
+endif()
 
 # Specify include directories for this target
 target_include_directories(graphlib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -46,11 +54,12 @@ target_link_libraries(graph500 ${MPI_LIBRARIES} graphlib)
 target_link_libraries(comm ${MPI_LIBRARIES} graphlib)
 
 # Adding the GPTL libraries
-target_link_libraries(graph500 -L$ENV{GPTL}/lib -lgptl -lunwind)
+if(ENABLE_PROFILING)
+  target_link_libraries(graph500 -L$ENV{GPTL}/lib -lgptl -lunwind)
+  target_compile_options(graph500 PRIVATE -rdynamic)
+endif()
 
 # Apply compile options to enable instrumentation and rdynamic for GPTL
-target_compile_options(graph500 PRIVATE -finstrument-functions -rdynamic)
-target_compile_options(graphlib PRIVATE -finstrument-functions -rdynamic)
 
 if(MPI_COMPILE_FLAGS)
   set_target_properties(graph500 PROPERTIES

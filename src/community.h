@@ -11,6 +11,21 @@
 #define MPI_NEIGHBOR_SYNC 3
 #define MPI_COMM_SYNC 4
 
+#ifdef PROFILE_FNS
+#include <gptl.h>  // Ensure the GPTL header is included if profiling
+#include <gptlmpi.h>  
+
+#define PROFILE(FUNC, ...) do { \
+    GPTLstart(#FUNC); \
+    FUNC(__VA_ARGS__); \
+    GPTLstop(#FUNC); \
+} while (0)
+
+#else
+
+#define PROFILE(FUNC, ...) FUNC(__VA_ARGS__)
+
+#endif
 
 struct Communities {
   std::vector<int> node_to_comm_map;
@@ -112,7 +127,7 @@ struct DistCommunities {
 
   void process_incoming_updates();
   void update_subscribers();
-  void update_neighbors();
+  void update_neighbors(int vtx);
   void receive_community_update(int source, MPI_Status& status, CommunityUpdate& update, std::vector<int>& rank_borders_buf);
   void send_community_update(int dest, const CommunityUpdate& update);
 

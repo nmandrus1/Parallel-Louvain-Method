@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-set(CMAKE_CXX_COMPILER mpicxx)
+# set(CMAKE_CXX_COMPILER mpicxx)
 project(Graph500 LANGUAGES CXX CUDA)
 
 # Check if GPTL environment variable is set
@@ -45,6 +45,8 @@ FetchContent_MakeAvailable(googletest)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
+
+option(ENABLE_PROFILING "Enable profiling with GPTL" OFF)
 
 add_subdirectory(src)
 add_subdirectory(tests)
