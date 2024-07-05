@@ -32,7 +32,7 @@ include_directories(${MPI_INCLUDE_PATH})
 # Include GPTL paths
 if(ENABLE_PROFILING)
   include_directories($ENV{GPTL}/include)
-  link_directoryies($ENV{GPTL}/lib)
+  link_directories($ENV{GPTL}/lib)
   add_definitions(-DPROFILE_FNS)
 endif()
 
