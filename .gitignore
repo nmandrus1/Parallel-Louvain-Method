@@ -4,6 +4,7 @@ graph-small.txt
 
 # data output
 level-*
+timing*
 
 # helix ignore file
 .ignore

@@ -8,6 +8,8 @@
 #include <sstream>
 #include <iostream>
 
+#include <gptl.h>
+
 ProcInfo* ProcInfo::instance = nullptr;
 
 ProcInfo::ProcInfo() {

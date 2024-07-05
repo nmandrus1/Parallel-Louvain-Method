@@ -14,6 +14,7 @@
 #include <unordered_set>
 
 #include <utility>
+#include <gptl.h>
 
 // default constructor
 Graph::Graph(size_t vcount) : Graph() {

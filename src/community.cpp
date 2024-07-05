@@ -13,6 +13,9 @@
 #include <stdlib.h>
 #include <random>
 
+#include <gptl.h>
+#include <gptlmpi.h>
+
 // Constructor for the Communities class.
 // Initializes internal data structures and sets up initial community
 // assignments where each node is its own community.
@@ -79,8 +82,7 @@ bool Communities::iterate() {
     for (int node = 0; node < g.local_vcount; node++) {
       int node_comm = node_to_comm_map[node];
 
-      compute_neighbors(node); // Update the weights to all neighboring
-                               // communities of the node.
+      compute_neighbors(node); // Update the weights to all neighboring // communities of the node.
 
       // Temporarily remove the node from its current community.
       remove(node, node_comm, edges_to_other_comms[node_comm]);
@@ -88,7 +90,7 @@ bool Communities::iterate() {
       // Determine the best community for this node based on potential
       // modularity gain.
       int best_comm = compute_best_community(node, node_comm);
-
+        
       // Insert the node into the best community found.
       insert(node, best_comm, edges_to_other_comms[best_comm]);
 
@@ -367,21 +369,25 @@ bool DistCommunities::iterate() {
       }
 
       // std::cout << "RANK " << g.info->rank << ": Computing neighbors" << std::endl;
-      compute_neighbors(vtx); // Update the weights to all neighboring
-                               // communities of the node.
+      GPTLstart("compute_neighbors");
+      compute_neighbors(vtx); // Update the weights to all neighboring // communities of the node.
+      GPTLstop("compute_neighbors");
 
       // Temporarily remove the node from its current community.
       // std::cout << "RANK " << g.info->rank << ": Removing vtx " << vtx << " from comm " << vtx_comm << std::endl;
 
-      remove(vtx, vtx_comm, g.degree(vtx), edges_to_other_comms[vtx_comm],
-             vtx_rank_degree[vtx]);
+      GPTLstart("remove");
+      remove(vtx, vtx_comm, g.degree(vtx), edges_to_other_comms[vtx_comm], vtx_rank_degree[vtx]);
+      GPTLstop("remove");
 
       // Determine the best community for this node based on potential
       // modularity gain.
 
       // std::cout << "RANK " << g.info->rank << ": computing best comm" << std::endl;
 
+      GPTLstart("compute_best_community");
       auto best_comm = compute_best_community(vtx, vtx_comm, temperature);
+      GPTLstop("compute_best_community");
 
       // change communities
       if(best_comm != vtx_comm) {
@@ -402,28 +408,41 @@ bool DistCommunities::iterate() {
 
         // std::cout << "RANK " << g.info->rank << ": Communicating removal/addition \t old: " << old_comm_owner << " new: " << new_comm_owner << std::endl;
 
-        if (old_comm_owner != g.info->rank)
+        if (old_comm_owner != g.info->rank) {
+          GPTLstart("send_community_update");
           send_community_update(old_comm_owner, update);
+          GPTLstop("send_community_update");
+        }
         // No else required since if the old owner was this rank then it was
         // removed properly by the remove() call
 
         if (new_comm_owner != g.info->rank) {
           update.type = CommunityUpdate::Addition;
+          GPTLstart("send_community_update");
           send_community_update(new_comm_owner, update);
+          GPTLstop("send_community_update");
         }
           total_num_moves++;
       }
 
       // no matter whether comms changed, vtx must be placed in a community for now
       // NOTE: subject to change if vertex rejections are implemented
+      GPTLstart("insert");
       insert(vtx, best_comm, g.degree(vtx), edges_to_other_comms[best_comm], vtx_rank_degree[vtx]);
+      GPTLstop("insert");
 
       MPI_Barrier(MPI_COMM_WORLD);
 
       // recieve updates from remote process about nodes joining local community
+      GPTLstart("process_incoming_updates");
       process_incoming_updates();
+      GPTLstop("process_incoming_updates");
+      GPTLstart("update_subscribers");
       update_subscribers();
+      GPTLstop("update_subscribers");
+      GPTLstart("update_neighbors");
       update_neighbors();
+      GPTLstop("update_neighbors");
     }
 
     if (total_num_moves > 0)
@@ -439,7 +458,9 @@ bool DistCommunities::iterate() {
                           // iteration.
     // print_comm_membership();
 
+    GPTLstart("modularity");
     auto mod = modularity();
+    GPTLstop("modularity");
     if (g.info->rank == 0) {
       std::cout << "Modularity: " << mod  << "\nTemp: " << temperature << std::endl;
       

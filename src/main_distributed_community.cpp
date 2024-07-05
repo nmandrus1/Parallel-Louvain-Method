@@ -6,6 +6,9 @@
 #include <string>
 #include <iostream>
 
+#include <gptl.h>
+#include <gptlmpi.h>
+
 namespace fs = std::filesystem;
 
 struct Args {
@@ -79,10 +82,14 @@ int main(int argc, char** argv) {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
 
+
   Args args;
   if(!parse_args(argc, argv, &args)) {
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
   }
+
+  auto ret = GPTLinitialize ();
+  ret = GPTLstart ("total");
 
   run(rank, comm_size, args);
 
@@ -92,7 +99,12 @@ int main(int argc, char** argv) {
   //   g.print_graph();
   // }
 
+  ret = GPTLstop("total");
+  ret = GPTLpr(rank);
+  GPTLpr_summary(MPI_COMM_WORLD);
+
   MPI_Finalize();
+  GPTLfinalize();
 }
 
 

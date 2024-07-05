@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 set(CMAKE_CXX_COMPILER mpicxx)
 project(Graph500 LANGUAGES CXX CUDA)
 
+# Check if GPTL environment variable is set
+if(NOT DEFINED ENV{GPTL})
+    message(FATAL_ERROR "The GPTL environment variable is not set. Please define it before configuring this project.")
+endif()
+
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF) 
