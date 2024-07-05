@@ -35,5 +35,15 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(googletest)
 
+# Centralize all binary output directories
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
+
 add_subdirectory(src)
 add_subdirectory(tests)
+
+# Custom target for cleaning the build directory
+add_custom_target(clean-all
+    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_BINARY_DIR}/build"
+    COMMAND ${CMAKE_COMMAND} -E echo "Cleaned up the build directory.")

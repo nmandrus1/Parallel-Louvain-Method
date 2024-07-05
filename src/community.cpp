@@ -99,6 +99,10 @@ bool Communities::iterate() {
     if (total_num_moves > 0)
       improvement = true;
 
+    
+    auto mod = modularity();
+    std::cout << "Modularity: " << mod  << std::endl;
+
     if (total_num_moves == prev_num_moves)
       return improvement; // Return whether there was any improvement in this
                           // iteration.
@@ -367,7 +371,7 @@ bool DistCommunities::iterate() {
                                // communities of the node.
 
       // Temporarily remove the node from its current community.
-      std::cout << "RANK " << g.info->rank << ": Removing vtx " << vtx << " from comm " << vtx_comm << std::endl;
+      // std::cout << "RANK " << g.info->rank << ": Removing vtx " << vtx << " from comm " << vtx_comm << std::endl;
 
       remove(vtx, vtx_comm, g.degree(vtx), edges_to_other_comms[vtx_comm],
              vtx_rank_degree[vtx]);
@@ -433,7 +437,7 @@ bool DistCommunities::iterate() {
     if (all_finished)
       return improvement; // Return whether there was any improvement in this
                           // iteration.
-    print_comm_membership();
+    // print_comm_membership();
 
     auto mod = modularity();
     if (g.info->rank == 0) {

@@ -2,6 +2,9 @@
 graph.txt
 graph-small.txt
 
+# data output
+level-*
+
 # helix ignore file
 .ignore
 #sync script
