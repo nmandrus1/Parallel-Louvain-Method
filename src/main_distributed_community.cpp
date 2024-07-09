@@ -1,7 +1,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <mpi.h>
-#include "community.h"
+#include "distcommunity.h"
 #include "graph.h"
 #include <string>
 #include <iostream>
