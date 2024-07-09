@@ -1,7 +1,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <mpi.h>
-#include "community.h"
+#include "distcommunity.h"
 #include "graph.h"
 #include <string>
 #include <iostream>
@@ -79,10 +79,16 @@ int main(int argc, char** argv) {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
 
+
   Args args;
   if(!parse_args(argc, argv, &args)) {
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
   }
+
+  #ifdef PROFILE_FNS
+  auto ret = GPTLinitialize ();
+  ret = GPTLstart ("total");
+  #endif
 
   run(rank, comm_size, args);
 
@@ -91,6 +97,13 @@ int main(int argc, char** argv) {
   //   g = Graph(f, false);
   //   g.print_graph();
   // }
+
+  #ifdef PROFILE_FNS
+  ret = GPTLstop("total");
+  ret = GPTLpr(rank);
+  GPTLpr_summary(MPI_COMM_WORLD);
+  GPTLfinalize();
+  #endif 
 
   MPI_Finalize();
 }

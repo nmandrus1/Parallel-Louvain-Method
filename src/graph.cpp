@@ -12,6 +12,7 @@
 #include <set>
 
 #include <utility>
+#include <gptl.h>
 
 void Graph::sparsify(const std::map<int, std::set<unsigned>>& adj_list) {
   ecount = 0;

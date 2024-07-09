@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-set(CMAKE_CXX_COMPILER mpicxx)
-project(Graph500 LANGUAGES CXX CUDA)
+# set(CMAKE_CXX_COMPILER mpicxx)
+project(Graph500 LANGUAGES CXX)
+
+# Check if GPTL environment variable is set
+if(NOT DEFINED ENV{GPTL})
+    message(FATAL_ERROR "The GPTL environment variable is not set. Please define it before configuring this project.")
+endif()
+
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,5 +41,17 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(googletest)
 
+# Centralize all binary output directories
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
+
+option(ENABLE_PROFILING "Enable profiling with GPTL" OFF)
+
 add_subdirectory(src)
 add_subdirectory(tests)
+
+# Custom target for cleaning the build directory
+add_custom_target(clean-all
+    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_BINARY_DIR}/build"
+    COMMAND ${CMAKE_COMMAND} -E echo "Cleaned up the build directory.")
