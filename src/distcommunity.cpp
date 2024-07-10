@@ -32,7 +32,7 @@ DistCommunities::DistCommunities(Graph &g) : g(g) {
   for (int v = g.rows.first; v < g.rows.second; v++) {
     for (auto n : g.neighbors(v)) {
       int owner = g.getRankOfOwner(n);
-      if (owner != g.info->rank) {
+      if (owner != g.info.rank) {
         msg_map[owner].push_back(v);
         msg_map[owner].push_back(g.degree(v));
       }
@@ -79,7 +79,7 @@ DistCommunities::DistCommunities(Graph &g) : g(g) {
       vtx_rank_degree[v][neighbor_owner]++;
       comm_ref_count[v][neighbor_owner]++;
 
-      if (neighbor_owner != g.info->rank)
+      if (neighbor_owner != g.info.rank)
         rank_to_border_vertices[neighbor_owner].insert(v);
 
       if (gbl_vtx_to_comm_map.contains(n))
@@ -159,7 +159,7 @@ bool DistCommunities::iterate() {
   std::iota(vertices.begin(), vertices.end(), g.rows.first);
 
   std::default_random_engine eng;
-  eng.seed(g.info->rank);
+  eng.seed(g.info.rank);
 
   // negative for exponential decay of temperature as a function of the number of 
   // iterations over every vertex. Higher the number of iterations, the less likely 
@@ -180,7 +180,7 @@ bool DistCommunities::iterate() {
         std::cout << "!";
       }
 
-      // std::cout << "RANK " << g.info->rank << ": Computing neighbors" << std::endl;
+      // std::cout << "RANK " << g.info.rank << ": Computing neighbors" << std::endl;
       #ifdef PROFILE_FNS
       GPTLstart("compute_neighbors");
       #endif
@@ -190,7 +190,7 @@ bool DistCommunities::iterate() {
       #endif
 
       // Temporarily remove the node from its current community.
-      // std::cout << "RANK " << g.info->rank << ": Removing vtx " << vtx << " from comm " << vtx_comm << std::endl;
+      // std::cout << "RANK " << g.info.rank << ": Removing vtx " << vtx << " from comm " << vtx_comm << std::endl;
 
       #ifdef PROFILE_FNS
       GPTLstart("remove");
@@ -203,7 +203,7 @@ bool DistCommunities::iterate() {
       // Determine the best community for this node based on potential
       // modularity gain.
 
-      // std::cout << "RANK " << g.info->rank << ": computing best comm" << std::endl;
+      // std::cout << "RANK " << g.info.rank << ": computing best comm" << std::endl;
 
       #ifdef PROFILE_FNS
       GPTLstart("compute_best_community");
@@ -215,7 +215,7 @@ bool DistCommunities::iterate() {
 
       // change communities
       if(best_comm != vtx_comm) {
-        // std::cout << "RANK " << g.info->rank << ": best comm = " << best_comm << std::endl;
+        // std::cout << "RANK " << g.info.rank << ": best comm = " << best_comm << std::endl;
 
         // calculate the ranks that own the old and new communities
         int old_comm_owner = g.getRankOfOwner(vtx_comm);
@@ -230,9 +230,9 @@ bool DistCommunities::iterate() {
                                   edges_to_other_comms[best_comm],
                                   (int)vtx_rank_degree[vtx].size()};
 
-        // std::cout << "RANK " << g.info->rank << ": Communicating removal/addition \t old: " << old_comm_owner << " new: " << new_comm_owner << std::endl;
+        // std::cout << "RANK " << g.info.rank << ": Communicating removal/addition \t old: " << old_comm_owner << " new: " << new_comm_owner << std::endl;
 
-        if (old_comm_owner != g.info->rank) {
+        if (old_comm_owner != g.info.rank) {
           #ifdef PROFILE_FNS
           GPTLstart("send_community_update");
           #endif
@@ -244,7 +244,7 @@ bool DistCommunities::iterate() {
         // No else required since if the old owner was this rank then it was
         // removed properly by the remove() call
 
-        if (new_comm_owner != g.info->rank) {
+        if (new_comm_owner != g.info.rank) {
           update.type = CommunityUpdate::Addition;
           #ifdef PROFILE_FNS
           GPTLstart("send_community_update");
@@ -318,7 +318,7 @@ bool DistCommunities::iterate() {
     GPTLstop("modularity");
     #endif
 
-    if (g.info->rank == 0) {
+    if (g.info.rank == 0) {
       std::cout << "Modularity: " << mod  << "\nTemp: " << temperature << std::endl;
       
     }
@@ -375,7 +375,7 @@ void DistCommunities::update_subscribers() {
   for (auto &comm: comms_updated_this_iter) {
     CommunityInfo updated_info = {comm, in[comm], total[comm]};
     for (auto &[rank, count] : comm_ref_count[comm]) {
-      if(rank == g.info->rank) continue;
+      if(rank == g.info.rank) continue;
 
       MPI_Send(&updated_info, sizeof(CommunityInfo), MPI_BYTE, rank,
                MPI_COMM_SYNC, MPI_COMM_WORLD);
@@ -555,7 +555,7 @@ void DistCommunities::send_community_update(int dest, const CommunityUpdate &upd
 
     MPI_Send(buffer, position, MPI_PACKED, dest, MPI_DATA_TAG, MPI_COMM_WORLD);
 
-    // std::cout << "RANK " << g.info->rank << ": Sending packed update to rank " << dest << std::endl;
+    // std::cout << "RANK " << g.info.rank << ": Sending packed update to rank " << dest << std::endl;
 }
 
 
@@ -592,9 +592,9 @@ void DistCommunities::receive_community_update(
 void DistCommunities::print_comm_ref_counts() {
 
   // print comm_ref_counts
-  for (int i = 0; i < g.info->comm_size; i++) {
-    if (g.info->rank == i) {
-      std::cout << "RANK " << g.info->rank << ": Community Reference Counts\n";
+  for (int i = 0; i < g.info.comm_size; i++) {
+    if (g.info.rank == i) {
+      std::cout << "RANK " << g.info.rank << ": Community Reference Counts\n";
       for (int v = g.rows.first; v < g.rows.second; v++) {
         std::cout << "\tCommunity " << v << "\n";
         for (auto &[rank, count] : comm_ref_count[v])
@@ -610,10 +610,10 @@ void DistCommunities::print_comm_ref_counts() {
 void DistCommunities::print_comm_membership() {
 
   // print comm_ref_counts
-  for (int i = 0; i < g.info->comm_size; i++) {
-    if (g.info->rank == i) {
+  for (int i = 0; i < g.info.comm_size; i++) {
+    if (g.info.rank == i) {
       for (int v = g.rows.first; v < g.rows.second; v++) 
-         std::cout << "RANK " << g.info->rank << ": Vtx " << v << " Community: " << gbl_vtx_to_comm_map[v] << "\n";
+         std::cout << "RANK " << g.info.rank << ": Vtx " << v << " Community: " << gbl_vtx_to_comm_map[v] << "\n";
       std::cout << std::endl;
     }
 
@@ -624,7 +624,7 @@ void DistCommunities::print_comm_membership() {
 void DistCommunities::write_communities_to_file(const std::string& directory) {
     // Create a filename based on the rank
     std::ostringstream filename;
-    filename << directory << "/" << g.info->rank << ".txt";
+    filename << directory << "/" << g.info.rank << ".txt";
 
     // Open the output file stream
     std::ofstream outfile(filename.str());
@@ -644,7 +644,7 @@ void DistCommunities::write_communities_to_file(const std::string& directory) {
     // Synchronize after writing to ensure all files are written
     MPI_Barrier(MPI_COMM_WORLD);
 
-    if (g.info->rank == 0) {
+    if (g.info.rank == 0) {
         std::cout << "All ranks have finished writing community data to " << directory << std::endl;
     }
 }

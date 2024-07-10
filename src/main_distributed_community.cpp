@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <filesystem>
+#include <gptl.h>
 #include <mpi.h>
 #include "distcommunity.h"
 #include "graph.h"
@@ -41,7 +42,15 @@ int run(int rank, int comm_size, Args args) {
   DistCommunities dist_comm(g);
 
   double init_mod = dist_comm.modularity();
+  #ifdef PROFILE_FNS
+  GPTLstart("iterate");
+  #endif
+
   dist_comm.iterate();
+
+  #ifdef PROFILE_FNS
+  GPTLstop("iterate");
+  #endif
   MPI_Barrier(MPI_COMM_WORLD);
   double new_mod = dist_comm.modularity();
 
