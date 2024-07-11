@@ -14,6 +14,15 @@
 #include <random>
 
 
+void create_degree_info_datatype(MPI_Datatype* dt);
+void create_community_update_datatype(MPI_Datatype* dt);
+
+
+struct DegreeInfo {
+  int vtx;
+  double degree;
+};
+
 // Constructor for the DistCommunities class.
 // Initializes internal data structures and sets up initial community
 // assignments where each node is its own community.
@@ -24,58 +33,78 @@ DistCommunities::DistCommunities(Graph &g) : g(g) {
   total.reserve(g.local_vcount * 2);
   neighbor_comms.resize(g.local_vcount);
   edges_to_other_comms.reserve(g.local_vcount * 2);
-  neighbor_degree.reserve(g.local_vcount * 2);
+  std::unordered_map<int,double> neighbor_degree(g.local_vcount * 2);
 
-  std::unordered_map<int, std::vector<int>> msg_map;
+  create_degree_info_datatype(&MPI_DEGREE_INFO);
+  create_community_update_datatype(&MPI_COMMUNITY_UPDATE);
 
-  // exchange the degree of our local vertices to their neighbors
+  // map rank to list of vertices that have an edge in that rank
+  std::unordered_map<int, std::unordered_set<int>> msg_map;
+
+  // 2d array of buffers to send to other ranks idx = rank
+  std::vector<std::vector<DegreeInfo>> send_bufs(g.info.comm_size);
+  std::vector<int> send_counts(g.info.comm_size, 0);
+
   for (int v = g.rows.first; v < g.rows.second; v++) {
-    for (auto n : g.neighbors(v)) {
+    double weighted_degree = g.weighted_degree(v);
+    for (auto [n, weight] : g.neighbors(v)) {
       int owner = g.getRankOfOwner(n);
       if (owner != g.info.rank) {
-        msg_map[owner].push_back(v);
-        msg_map[owner].push_back(g.degree(v));
+        if(!msg_map[owner].insert(v).second) continue;
+
+          send_bufs[owner].push_back({v, weighted_degree});
+          send_counts[owner]++;
       }
     }
   }
 
-  int degree_buf[2];
-
-  for (auto &[rank, degrees] : msg_map) {
-    for (int i = 0; i < degrees.size(); i += 2) {
-      degree_buf[0] = degrees[i];
-      degree_buf[1] = degrees[i + 1];
-      MPI_Send(&degree_buf, 2, MPI_INT, rank, 0, MPI_COMM_WORLD);
-    }
+  std::vector<int> sdispls(g.info.comm_size);
+  int total_send = 0;
+  for (int i = 0; i < g.info.comm_size; ++i) {
+      sdispls[i] = total_send;
+      total_send += send_counts[i];
   }
 
-  MPI_Barrier(MPI_COMM_WORLD);
+  // Assuming recv_counts and rdispls are similarly calculated
+  std::vector<int> recv_counts(g.info.comm_size, 0);
+  MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
 
-  int flag;
-  MPI_Status status;
-  while (true) {
-    MPI_Iprobe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &flag, &status);
-
-    if (flag) {
-      MPI_Recv(&degree_buf, 2, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD,
-               &status);
-      neighbor_degree.insert({degree_buf[0], degree_buf[1]});
-    } else {
-      // No more updates available at this time
-      break;
-    }
+  std::vector<int> rdispls(g.info.comm_size);
+  // The total receive size would need to be calculated by all processes collectively, potentially using MPI_Alltoall to share the send_counts
+  // Calculate receive displacements
+  int total_receive = 0; // This will accumulate the total number of items to receive
+  for (int i = 0; i < g.info.comm_size; ++i) {
+      rdispls[i] = total_receive;
+      total_receive += recv_counts[i];
   }
+
+  // You'll need to concatenate your send_bufs into a single buffer for sending
+  std::vector<DegreeInfo> send_data;
+  send_data.reserve(total_send);
+  for (const auto& buf : send_bufs) {
+      send_data.insert(send_data.end(), buf.begin(), buf.end());
+  }
+
+  std::vector<DegreeInfo> recv_data(total_receive);  // total_receive needs to be calculated
+
+  MPI_Alltoallv(send_data.data(), send_counts.data(), sdispls.data(), MPI_DEGREE_INFO,
+                recv_data.data(), recv_counts.data(), rdispls.data(), MPI_DEGREE_INFO, MPI_COMM_WORLD);
+
+
+
+  for(auto info: recv_data) neighbor_degree[info.vtx] = info.degree;
 
   // Initialize communities such that each row node is in its own community.
   // global indexing
   for (int v = g.rows.first; v < g.rows.second; v++) {
     gbl_vtx_to_comm_map[v] = v;
     comm_size[v] = 1;
-    total[v] = g.degree(v); // Total degree of the community is the degree of the node.
+    total[v] = g.weighted_degree(v); // Total degree of the community is the degree of the node.
     in[v] = 0;              // Initially, no internal edges within the community.
 
-    for (int n : g.neighbors(v)) {
+    for (auto [n, weight] : g.neighbors(v)) {
       int neighbor_owner = g.getRankOfOwner(n);
+
       vtx_rank_degree[v][neighbor_owner]++;
       comm_ref_count[v][neighbor_owner]++;
 
@@ -87,12 +116,13 @@ DistCommunities::DistCommunities(Graph &g) : g(g) {
       gbl_vtx_to_comm_map[n] = n;
       total[n] = neighbor_degree[n];
       in[n] = 0;
-
-      // if there is a remote neighbor that needs to be kept up to date add them
-      // to subscriber list
-
     }
   }
+}
+
+DistCommunities::~DistCommunities() {
+  MPI_Type_free(&MPI_DEGREE_INFO);
+  MPI_Type_free(&MPI_COMMUNITY_UPDATE);
 }
 
 // Inserts a node into a community and updates relevant metrics.
@@ -133,13 +163,11 @@ void DistCommunities::remove(int node, int community, int degree,
 // assignments.
 double DistCommunities::modularity() {
   double q = 0.0;
-  double m2 = static_cast<double>(g.ecount) *
-              2; // Total weight of all edges in the graph, multiplied by 2.
+  double m2 = static_cast<double>(g.ecount) * 2; // Total weight of all edges in the graph, multiplied by 2.
 
   for (int v = g.rows.first; v < g.rows.second; v++) {
     if (total[v] > 0)
-      q += in[v] / m2 -
-           (total[v] / m2) * (total[v] / m2); // Modularity formula as sum of
+      q += in[v] / m2 - (total[v] / m2) * (total[v] / m2); // Modularity formula as sum of
                                               // each community's contribution.
   }
 
@@ -166,7 +194,7 @@ bool DistCommunities::iterate() {
   // it should be for vertices to move around
   int iteration = -1;
   double temperature;
-  
+
   while (true) {
     temperature = std::exp(static_cast<double>(iteration));
 
@@ -175,10 +203,6 @@ bool DistCommunities::iterate() {
 
     for (int vtx: vertices) {
       int vtx_comm = gbl_vtx_to_comm_map[vtx];
-
-      if(vtx == 3 || vtx == 6 || vtx == 7) {
-        std::cout << "!";
-      }
 
       // std::cout << "RANK " << g.info.rank << ": Computing neighbors" << std::endl;
       #ifdef PROFILE_FNS
@@ -195,7 +219,7 @@ bool DistCommunities::iterate() {
       #ifdef PROFILE_FNS
       GPTLstart("remove");
       #endif
-      remove(vtx, vtx_comm, g.degree(vtx), edges_to_other_comms[vtx_comm], vtx_rank_degree[vtx]);
+      remove(vtx, vtx_comm, g.weighted_degree(vtx), edges_to_other_comms[vtx_comm], vtx_rank_degree[vtx]);
       #ifdef PROFILE_FNS
       GPTLstop("remove");
       #endif
@@ -223,7 +247,7 @@ bool DistCommunities::iterate() {
 
         CommunityUpdate update = { CommunityUpdate::Removal,
                                   vtx,
-                                  g.degree(vtx),
+                                  g.weighted_degree(vtx),
                                   vtx_comm,
                                   best_comm,
                                   edges_to_other_comms[vtx_comm],
@@ -262,7 +286,7 @@ bool DistCommunities::iterate() {
       #ifdef PROFILE_FNS
       GPTLstart("insert");
       #endif
-      insert(vtx, best_comm, g.degree(vtx), edges_to_other_comms[best_comm], vtx_rank_degree[vtx]);
+      insert(vtx, best_comm, g.weighted_degree(vtx), edges_to_other_comms[best_comm], vtx_rank_degree[vtx]);
       #ifdef PROFILE_FNS
       GPTLstop("insert");
       #endif
@@ -328,6 +352,21 @@ bool DistCommunities::iterate() {
   }
 }
 
+void DistCommunities::send_community_update(int dest, const CommunityUpdate& update) {
+  MPI_Request req;
+  MPI_Isend(&update, 1, MPI_COMMUNITY_UPDATE, dest, MPI_DATA_TAG, MPI_COMM_WORLD, &req);
+
+  std::vector<int> send_buf;
+  for (auto &[rank, count] : vtx_rank_degree[update.node]) {
+    send_buf.push_back(rank);
+    send_buf.push_back(count);
+  }
+
+  MPI_Wait(&req, MPI_STATUS_IGNORE);
+
+  MPI_Send(send_buf.data(), send_buf.size(), MPI_INT, dest, MPI_DATA_TAG, MPI_COMM_WORLD);
+}
+
 void DistCommunities::process_incoming_updates() {
   MPI_Status status;
   int flag;
@@ -342,8 +381,11 @@ void DistCommunities::process_incoming_updates() {
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_DATA_TAG, MPI_COMM_WORLD, &flag, &status);
 
     if (flag) {
-      receive_community_update(status.MPI_SOURCE, status,
-                               update, buf);
+      MPI_Recv(&update, 1, MPI_COMMUNITY_UPDATE, status.MPI_SOURCE, MPI_DATA_TAG, MPI_COMM_WORLD, &status);
+
+      buf.clear();
+      buf.resize(update.num_ranks_bordering_node * 2);
+      MPI_Recv(buf.data(), buf.size(), MPI_INT, status.MPI_SOURCE, MPI_DATA_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
       for (int i = 0; i < 2 * update.num_ranks_bordering_node; i += 2) {
         int rank = buf[i], count = buf[i + 1];
@@ -497,19 +539,19 @@ void DistCommunities::compute_neighbors(int node) {
   edges_to_other_comms[node_comm] = 0;
   neighbor_comms.push_back(node_comm);
 
-  for (int neighbor : g.neighbors(node)) {
+  for (auto [neighbor, weight]: g.neighbors(node)) {
     int neighbor_comm = gbl_vtx_to_comm_map[neighbor];
 
     if (node != neighbor) {
       // if this neighbor community hasn't been seen yet,
       // initialize it before adding weight to it
       if (!edges_to_other_comms.contains(neighbor_comm)) {
-        edges_to_other_comms[neighbor_comm] = 0;
+        edges_to_other_comms[neighbor_comm] = 0.0;
         neighbor_comms.push_back(neighbor_comm);
       }
 
       // Increment the edge weight to the neighboring community.
-      edges_to_other_comms[neighbor_comm] += 1.0;
+      edges_to_other_comms[neighbor_comm] += weight;
     }
   }
 }
@@ -518,75 +560,11 @@ void DistCommunities::compute_neighbors(int node) {
 double DistCommunities::modularity_gain(int node, int comm,
                                         double node_comm_degree) {
   double totc = static_cast<double>(total[comm]);
-  double degc = static_cast<double>(g.degree(node));
+  double degc = static_cast<double>(g.weighted_degree(node));
   double m2 = static_cast<double>(g.ecount) * 2;
   double dnc = static_cast<double>(node_comm_degree);
 
   return (dnc - totc * degc / m2); // Modularity gain formula.
-}
-
-void DistCommunities::send_community_update(int dest, const CommunityUpdate &update) {
-    int position = 0;
-    int num_ranks_size = 2 * update.num_ranks_bordering_node * sizeof(int);
-    int total_size = 0;
-    MPI_Pack_size(6, MPI_INT, MPI_COMM_WORLD, &total_size); // For node, global_degree, old_comm, new_comm, num_ranks_bordering_node, and type
-    total_size += num_ranks_size; // Add size for the variable part
-    total_size += 2 * sizeof(double); // Add size for the double fields
-
-    unsigned char *buffer = (unsigned char *)alloca(total_size);
-    assert(buffer != NULL);
-
-    // Pack the enum as int
-    int update_type = static_cast<int>(update.type);
-    MPI_Pack(&update_type, 1, MPI_INT, buffer, total_size, &position, MPI_COMM_WORLD);
-
-    MPI_Pack(&update.node, 1, MPI_INT, buffer, total_size, &position, MPI_COMM_WORLD);
-    MPI_Pack(&update.global_degree, 1, MPI_INT, buffer, total_size, &position, MPI_COMM_WORLD);
-    MPI_Pack(&update.old_comm, 1, MPI_INT, buffer, total_size, &position, MPI_COMM_WORLD);
-    MPI_Pack(&update.new_comm, 1, MPI_INT, buffer, total_size, &position, MPI_COMM_WORLD);
-    MPI_Pack(&update.edges_within_old_comm, 1, MPI_DOUBLE, buffer, total_size, &position, MPI_COMM_WORLD);
-    MPI_Pack(&update.edges_within_new_comm, 1, MPI_DOUBLE, buffer, total_size, &position, MPI_COMM_WORLD);
-    MPI_Pack(&update.num_ranks_bordering_node, 1, MPI_INT, buffer, total_size, &position, MPI_COMM_WORLD);
-
-    for (auto &[rank, count] : vtx_rank_degree[update.node]) {
-        MPI_Pack(&rank, 1, MPI_INT, buffer, total_size, &position, MPI_COMM_WORLD);
-        MPI_Pack(&count, 1, MPI_INT, buffer, total_size, &position, MPI_COMM_WORLD);
-    }
-
-    MPI_Send(buffer, position, MPI_PACKED, dest, MPI_DATA_TAG, MPI_COMM_WORLD);
-
-    // std::cout << "RANK " << g.info.rank << ": Sending packed update to rank " << dest << std::endl;
-}
-
-
-
-// Function to receive a CommunityUpdate structure
-void DistCommunities::receive_community_update(
-    int source, MPI_Status &status, CommunityUpdate &update,
-    std::vector<int> &rank_borders_buf) {
-
-  int count;
-    MPI_Get_count(&status, MPI_PACKED, &count);
-    unsigned char *buffer = (unsigned char *)alloca(count);
-    assert(buffer != NULL);
-
-    MPI_Recv(buffer, count, MPI_PACKED, source, MPI_DATA_TAG, MPI_COMM_WORLD, &status);
-
-    int position = 0;
-    int update_type;
-    MPI_Unpack(buffer, count, &position, &update_type, 1, MPI_INT, MPI_COMM_WORLD);
-    update.type = static_cast<CommunityUpdate::UpdateType>(update_type);
-
-    MPI_Unpack(buffer, count, &position, &update.node, 1, MPI_INT, MPI_COMM_WORLD);
-    MPI_Unpack(buffer, count, &position, &update.global_degree, 1, MPI_INT, MPI_COMM_WORLD);
-    MPI_Unpack(buffer, count, &position, &update.old_comm, 1, MPI_INT, MPI_COMM_WORLD);
-    MPI_Unpack(buffer, count, &position, &update.new_comm, 1, MPI_INT, MPI_COMM_WORLD);
-    MPI_Unpack(buffer, count, &position, &update.edges_within_old_comm, 1, MPI_DOUBLE, MPI_COMM_WORLD);
-    MPI_Unpack(buffer, count, &position, &update.edges_within_new_comm, 1, MPI_DOUBLE, MPI_COMM_WORLD);
-    MPI_Unpack(buffer, count, &position, &update.num_ranks_bordering_node, 1, MPI_INT, MPI_COMM_WORLD);
-
-    rank_borders_buf.resize(2 * update.num_ranks_bordering_node);
-    MPI_Unpack(buffer, count, &position, rank_borders_buf.data(), 2 * update.num_ranks_bordering_node, MPI_INT, MPI_COMM_WORLD);
 }
 
 void DistCommunities::print_comm_ref_counts() {
@@ -648,3 +626,59 @@ void DistCommunities::write_communities_to_file(const std::string& directory) {
         std::cout << "All ranks have finished writing community data to " << directory << std::endl;
     }
 }
+
+void create_degree_info_datatype(MPI_Datatype* dt) { 
+  int lengths[] = {1, 1};
+  // Calculate displacements
+  // In C, by default padding can be inserted between fields. MPI_Get_address will allow
+  // to get the address of each struct field and calculate the corresponding displacement
+  // relative to that struct base address. The displacements thus calculated will therefore
+  // include padding if any.
+  MPI_Aint displacements[2];
+  DegreeInfo dummy_info;
+  MPI_Aint base_address;
+  MPI_Get_address(&dummy_info, &base_address);
+  MPI_Get_address(&dummy_info.vtx, &displacements[0]);
+  MPI_Get_address(&dummy_info.degree, &displacements[1]);
+  displacements[0] = MPI_Aint_diff(displacements[0], base_address);
+  displacements[1] = MPI_Aint_diff(displacements[1], base_address);
+
+  MPI_Datatype types[2] = { MPI_INT, MPI_DOUBLE};
+  MPI_Type_create_struct(2, lengths, displacements, types, dt);
+  MPI_Type_commit(dt);
+}
+
+void create_community_update_datatype(MPI_Datatype* dt) { 
+  int lengths[] = {1, 1, 1, 1, 1, 1, 1, 1};
+  // Calculate displacements
+  // In C, by default padding can be inserted between fields. MPI_Get_address will allow
+  // to get the address of each struct field and calculate the corresponding displacement
+  // relative to that struct base address. The displacements thus calculated will therefore
+  // include padding if any.
+  MPI_Aint displacements[8];
+  CommunityUpdate dummy_update;
+  MPI_Aint base_address;
+  MPI_Get_address(&dummy_update, &base_address);
+  MPI_Get_address(&dummy_update.type, &displacements[0]);
+  MPI_Get_address(&dummy_update.node, &displacements[1]);
+  MPI_Get_address(&dummy_update.global_degree, &displacements[2]);
+  MPI_Get_address(&dummy_update.old_comm, &displacements[3]);
+  MPI_Get_address(&dummy_update.new_comm, &displacements[4]);
+  MPI_Get_address(&dummy_update.edges_within_old_comm, &displacements[5]);
+  MPI_Get_address(&dummy_update.edges_within_new_comm, &displacements[6]);
+  MPI_Get_address(&dummy_update.num_ranks_bordering_node, &displacements[7]);
+  displacements[0] = MPI_Aint_diff(displacements[0], base_address);
+  displacements[1] = MPI_Aint_diff(displacements[1], base_address);
+  displacements[2] = MPI_Aint_diff(displacements[2], base_address);
+  displacements[3] = MPI_Aint_diff(displacements[3], base_address);
+  displacements[4] = MPI_Aint_diff(displacements[4], base_address);
+  displacements[5] = MPI_Aint_diff(displacements[5], base_address);
+  displacements[6] = MPI_Aint_diff(displacements[6], base_address);
+  displacements[7] = MPI_Aint_diff(displacements[7], base_address);
+
+  MPI_Datatype types[8] = { MPI_INT, MPI_INT, MPI_DOUBLE, MPI_INT, MPI_INT, MPI_DOUBLE, MPI_DOUBLE, MPI_INT};
+  MPI_Type_create_struct(8, lengths, displacements, types, dt);
+  MPI_Type_commit(dt);
+}
+
+

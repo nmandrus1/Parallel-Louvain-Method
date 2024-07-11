@@ -25,7 +25,7 @@ struct CommunityUpdate {
 
   UpdateType type;
   int node;
-  int global_degree;
+  double global_degree;
   int old_comm;
   int new_comm;
   double edges_within_old_comm;
@@ -51,8 +51,6 @@ struct DistCommunities {
   // map a community to its size
   std::unordered_map<int, int> comm_size;
 
-  std::unordered_map<int,int> neighbor_degree;
-
   // stores running summations used to quickly calculate community modularity
   std::unordered_map<int, double> in, total;
 
@@ -71,6 +69,7 @@ struct DistCommunities {
   std::unordered_set<int> comms_updated_this_iter;
 
   DistCommunities(Graph& g);
+  ~DistCommunities();
   
   double modularity();
   void insert(int node, int community, int degree, int edges_within_comm, std::unordered_map<int, int>& rank_counts);
@@ -85,7 +84,6 @@ struct DistCommunities {
   void process_incoming_updates();
   void update_subscribers();
   void update_neighbors(int vtx);
-  void receive_community_update(int source, MPI_Status& status, CommunityUpdate& update, std::vector<int>& rank_borders_buf);
   void send_community_update(int dest, const CommunityUpdate& update);
 
   // I/O
@@ -96,6 +94,10 @@ struct DistCommunities {
   Graph into_new_graph();
   
   Graph& g;
+
+  // MPI CUSTOM Datatype
+  MPI_Datatype MPI_DEGREE_INFO;
+  MPI_Datatype MPI_COMMUNITY_UPDATE;
 };
 
 

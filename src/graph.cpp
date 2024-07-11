@@ -1,54 +1,92 @@
 #include "graph.h"
 #include "util.h"
 
+#include <iomanip>
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
+#include <fcntl.h>
 #include <iostream>
 #include <mpi.h>
 #include <string>
 #include <unordered_map>
 #include <map>
 #include <set>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <sstream>
 
 #include <utility>
 #include <gptl.h>
 
-void Graph::sparsify(const std::map<int, std::set<unsigned>>& adj_list) {
-  ecount = 0;
-  row_index.push_back(0);
-  for (const auto& entry : adj_list) {
-      for (int neighbor : entry.second) {
-          column_index.push_back(neighbor);
-          data.push_back(1); // assuming all edges have weight 1 for simplicity
-      }
-      row_index.push_back(column_index.size());
-      ecount += entry.second.size();
-  }
+// Create an MPI_Datatype for Edge struct
+void create_edge_datatype(MPI_Datatype* dt); 
+
+Graph::EdgeList Graph::edge_list_from_file(const std::string& fname) {
+    std::ifstream file(fname);
+    if (!file.is_open()) {
+        std::cerr << "Error opening file: " << fname << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    EdgeList edges;  // Vector to store the edges
+    std::string line;
+
+    while (getline(file, line)) {
+        std::istringstream iss(line);
+        int u, v;
+        double w;
+
+        if (iss >> u >> v >> w) {  // Read two integers from the line
+            edges.push_back({u, v, w});  // Add the edge to the vector
+        } else {
+            std::cerr << "Error reading line: " << line << std::endl;
+        }
+    }
+    file.close();  // Close the file
+
+
+    return edges;
 }
 
-void Graph::initializeFromAdjList(const std::map<int, std::set<unsigned>>& adj_list) {
+int Graph::sparsify(const AdjacencyList& adj_list) {
+  int edges = 0;
+  row_index.push_back(0);
+  for (const auto& neighbors : adj_list) {
+      for (auto& [neighbor, weight]: neighbors.second) {
+          column_index.push_back(neighbor);
+          weights.push_back(weight);
+      }
+      row_index.push_back(column_index.size());
+      edges += neighbors.second.size();
+  }
+  return edges / 2;
+}
+
+void Graph::initializeFromAdjList(const AdjacencyList& adj_list) {
   local_vcount = adj_list.size();
   global_vcount = adj_list.size();
   rows.first = 0;
   rows.second = local_vcount;
-  sparsify(adj_list);
+  ecount = sparsify(adj_list);
 }
 
 // default constructor
-Graph::Graph(size_t vcount) : local_vcount(vcount), global_vcount(vcount) {
-  this->data.resize(vcount * vcount, 0);
-}
+Graph::Graph(size_t vcount) : local_vcount(vcount), global_vcount(vcount){}
 
-Graph::Graph(const std::vector<std::pair<int, int>> edge_list) {
-  std::map<int, std::set<unsigned>> adj_list;
-    for (auto& pair : edge_list) {
-        adj_list[pair.first].insert(pair.second);
-        adj_list[pair.second].insert(pair.first);
+Graph::Graph(const EdgeList& edge_list) {
+  AdjacencyList adj_list;
+    for (auto& edge : edge_list) {
+        adj_list[edge.v1].insert(std::make_pair(edge.v2, edge.weight));
+        adj_list[edge.v2].insert(std::make_pair(edge.v1, edge.weight));
     }
     initializeFromAdjList(adj_list);
 }
 
+Graph::Graph(const AdjacencyList& adj_list) {
+  initializeFromAdjList(adj_list);
+}
 
 Graph::Graph(const std::string &fname, bool distributed) {
   auto edges = edge_list_from_file(fname);
@@ -62,7 +100,7 @@ Graph::Graph(const std::string &fname, bool distributed) {
 }
 
 
-void Graph::distributedGraphInit(const std::vector<std::pair<int, int>>& edges, ProcInfo info) {
+void Graph::distributedGraphInit(const EdgeList& edges, ProcInfo info) {
   // if this is a distributed graph, we need to calculate which edges belong
   // where For now we assume that all edges are numbered 0 to n with no gaps map
   // ranks to the edges that need to go to that rank
@@ -71,7 +109,7 @@ void Graph::distributedGraphInit(const std::vector<std::pair<int, int>>& edges, 
 
   int max_vtx = 0;
   for (auto edge : edges)
-    max_vtx = std::max(std::max(max_vtx, edge.first), edge.second);
+    max_vtx = std::max(std::max(max_vtx, edge.v1), edge.v2);
 
   // send and recv the maximum vertex number, this + 1 is the total number of
   // vertices in the graph and we can use this information to help us partition
@@ -93,27 +131,22 @@ void Graph::distributedGraphInit(const std::vector<std::pair<int, int>>& edges, 
   ecount = edge_count;
 
   
-  std::unordered_map<int, std::vector<int>> msg_map;
+  std::unordered_map<int, EdgeList> msg_map;
+
   for (auto edge : edges) {
-    auto v1 = edge.first;
-    auto v2 = edge.second;
+    auto rank1 = edge.v1 / local_vcount;
+    auto rank2 = edge.v2 / local_vcount;
 
-    auto rank1 = v1 / local_vcount;
-    auto rank2 = v2 / local_vcount;
-    msg_map[rank1].push_back(v1);
-    msg_map[rank1].push_back(v2);
-
-    msg_map[rank2].push_back(v2);
-    msg_map[rank2].push_back(v1);
+    msg_map[rank1].push_back(edge);
+    msg_map[rank2].push_back(Edge { edge.v2, edge.v1, edge.weight});
   }
 
-  // store the length, in number of integers, that this proc is sending to each
-  // rank
-  int total_ints_to_send = 0;
-  std::vector<int> send_buf(info.comm_size, 0);
+  // store the length, in number of edges, that this proc is sending to each rank
+  int total_edges_to_send = 0;
+  std::vector<int> count_send_buf(info.comm_size, 0);
   for (auto entry : msg_map) {
-    send_buf[entry.first] = entry.second.size();
-    total_ints_to_send += entry.second.size();
+    count_send_buf[entry.first] = entry.second.size();
+    total_edges_to_send += entry.second.size();
   }
 
   // send 1 int to each proc
@@ -124,18 +157,19 @@ void Graph::distributedGraphInit(const std::vector<std::pair<int, int>>& edges, 
   for (int i = 0; i < info.comm_size; i++)
     displs_send[i] = i;
 
-  std::vector<int> recv_buf(info.comm_size);
+  std::vector<int> count_recv_buf(info.comm_size);
   // counts_recv is the same as counts_send
   // displ_recv is the same as displ_send
   MPI_Request req;
-  MPI_Ialltoallv(send_buf.data(), counts_send.data(), displs_send.data(),
-                 MPI_INT, recv_buf.data(), counts_send.data(),
+  MPI_Ialltoallv(count_send_buf.data(), counts_send.data(), displs_send.data(),
+                 MPI_INT, count_recv_buf.data(), counts_send.data(),
                  displs_send.data(), MPI_INT, MPI_COMM_WORLD, &req);
   MPI_Wait(&req, MPI_STATUS_IGNORE);
 
-  send_buf.resize(total_ints_to_send);
-  send_buf.clear();
   std::fill(counts_send.begin(), counts_send.end(), 0);
+
+
+  EdgeList send_buf;
 
   int send_displ = 0;
   for (int rank = 0; rank < info.comm_size; rank++) {
@@ -144,6 +178,7 @@ void Graph::distributedGraphInit(const std::vector<std::pair<int, int>>& edges, 
       continue;
 
     auto msg = entry->second;
+
     send_buf.insert(send_buf.end(), msg.begin(), msg.end());
     counts_send[rank] = msg.size();
 
@@ -152,62 +187,109 @@ void Graph::distributedGraphInit(const std::vector<std::pair<int, int>>& edges, 
     send_displ += msg.size();
   }
 
-  int total_ints_to_recv = 0;
+  int total_edges_to_recv = 0;
   std::vector<int> recv_counts(info.comm_size), recv_displ(info.comm_size);
   for (int rank = 0; rank < info.comm_size; rank++) {
-    recv_counts[rank] = recv_buf[rank];
+    recv_counts[rank] = count_recv_buf[rank];
 
-    recv_displ[rank] = total_ints_to_recv;
-    total_ints_to_recv += recv_buf[rank];
+    recv_displ[rank] = total_edges_to_recv;
+    total_edges_to_recv += count_recv_buf[rank];
   }
 
   // resize recv buffer
-  recv_buf.resize(total_ints_to_recv);
+  EdgeList recv_buf(total_edges_to_recv);
+
+  MPI_Datatype edge_type;
+  create_edge_datatype(&edge_type);
 
   MPI_Request req2;
   MPI_Ialltoallv(send_buf.data(), counts_send.data(), displs_send.data(),
-                 MPI_INT, recv_buf.data(), recv_counts.data(),
-                 recv_displ.data(), MPI_INT, MPI_COMM_WORLD, &req2);
+                 edge_type, recv_buf.data(), recv_counts.data(),
+                 recv_displ.data(), edge_type, MPI_COMM_WORLD, &req2);
   MPI_Wait(&req2, MPI_STATUS_IGNORE);
 
-  std::map<int, std::set<unsigned>> adj_list;
+  AdjacencyList adj_list;
 
   // Deserialize recv_data back into a usable format, e.g., updating
   // candidate_parents or similar structures
-  for (int i = 0; i < total_ints_to_recv; i += 2) {
-    int vertex = makeLocal(recv_buf[i]);
-    int neighbor = recv_buf[i + 1];
-    adj_list[vertex].insert(neighbor);
+  for (auto& edge: recv_buf) {
+    int vertex = makeLocal(edge.v1);
+    adj_list[vertex].insert({edge.v2, edge.weight});
   }
 
   sparsify(adj_list);
+
+  MPI_Type_free(&edge_type);
 }
 
 // get the list of vertices vert is connected to
-std::vector<unsigned> Graph::neighbors(const int v) const {
-  assert(in_row(v));
-  int vert = makeLocal(v);
+Graph::NeighborIterator Graph::neighbors(const int vert) const {
+   int local_vert = makeLocal(vert);
+    size_t start_idx = row_index[local_vert];
+    size_t end_idx = row_index[local_vert + 1];
+    return NeighborIterator(column_index, weights, start_idx, end_idx);
+}
 
-  unsigned row_start = this->row_index[vert];
-  unsigned row_end = this->row_index[vert + 1];
+// TODO: Cache weighted degree
+double Graph::weighted_degree(int vtx) const {
+  assert(in_row(vtx));
+  int vert = makeLocal(vtx);
 
-  return std::vector(column_index.begin() + row_start, column_index.begin() + row_end);
+  double sum = 0.0;
+  for(int i = row_index[vert]; i < row_index[vert+1]; i++)
+    sum += weights[i];
+
+  return sum;
 }
 
 void Graph::print_graph() const {
-  for (unsigned i = 0; i < this->local_vcount; i++) {
-    auto edges = neighbors(i);
-    auto edges_iter = edges.begin();
+    // Determine the width to use for each number in the matrix, for consistent formatting
+    int width = 6; // Adjust this width as needed for better spacing
 
-    for (unsigned j = 0; j < this->global_vcount; j++) {
-      if (edges_iter != edges.end() && *edges_iter == j) {
-        std::cout << 1;
-        edges_iter++;
-      } else std::cout << "0";
+    std::vector<double> weights_row(global_vcount, 0.0);
+    for (auto vtx = rows.first; vtx < rows.second; vtx++) {
+        // Fill in the weights from neighbors
+        for(auto [neighbor, weight] : neighbors(vtx)) {
+            weights_row[neighbor] = weight; // Assign weight to the correct column
+        }
 
-      std::cout << " ";
+        // Print out the row with each weight formatted nicely
+        for (int j = 0; j < global_vcount; j++) {
+            std::cout << std::setw(width) << std::setprecision(2) << std::fixed << weights_row[j];
+            if (j != global_vcount - 1) {
+                std::cout << " "; // Space between columns, except after the last one
+            }
+        }
+        std::cout << "\n"; // New line after each row
+
+        std::fill(weights_row.begin(), weights_row.end(), 0.0);
     }
-    std::cout << "\n";
-  }
-  std::cout << std::endl;
+    std::cout << std::endl; // Additional newline for separation after the whole matrix
 }
+
+
+void create_edge_datatype(MPI_Datatype* dt) {
+    int lengths[3] = { 1, 1, 1 };
+ 
+    // Calculate displacements
+    // In C, by default padding can be inserted between fields. MPI_Get_address will allow
+    // to get the address of each struct field and calculate the corresponding displacement
+    // relative to that struct base address. The displacements thus calculated will therefore
+    // include padding if any.
+    MPI_Aint displacements[3];
+    Edge dummy_edge;
+    MPI_Aint base_address;
+    MPI_Get_address(&dummy_edge, &base_address);
+    MPI_Get_address(&dummy_edge.v1, &displacements[0]);
+    MPI_Get_address(&dummy_edge.v2, &displacements[1]);
+    MPI_Get_address(&dummy_edge.weight, &displacements[2]);
+    displacements[0] = MPI_Aint_diff(displacements[0], base_address);
+    displacements[1] = MPI_Aint_diff(displacements[1], base_address);
+    displacements[2] = MPI_Aint_diff(displacements[2], base_address);
+ 
+    MPI_Datatype types[3] = { MPI_INT, MPI_INT, MPI_DOUBLE};
+    MPI_Type_create_struct(3, lengths, displacements, types, dt);
+    MPI_Type_commit(dt);
+  
+}
+

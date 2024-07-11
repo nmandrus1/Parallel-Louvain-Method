@@ -5,7 +5,6 @@
 #include <vector>
 #include <string>
 
-
 struct ProcInfo {
   // store rank, row, and column of adj matrix
   int rank, comm_size; 
@@ -16,6 +15,5 @@ struct ProcInfo {
 };
 
 
-std::vector<std::pair<int, int>> edge_list_from_file(const std::string& fname);
 
 #endif

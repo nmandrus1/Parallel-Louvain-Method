@@ -1,10 +1,10 @@
 #include "community.h"
+#include "graph.h"
 #include <algorithm>
 #include <alloca.h>
 #include <iostream>
 #include <mpi.h>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -14,7 +14,6 @@
 Communities::Communities(Graph &g) : g(g) {
   // Resize all vectors to accommodate the graph's vertex count.
   node_to_comm_map.resize(g.local_vcount);
-  comm_to_degree_map.resize(g.local_vcount);
   in.resize(g.local_vcount);
   total.resize(g.local_vcount);
   neighbor_comms.resize(g.local_vcount);
@@ -23,24 +22,23 @@ Communities::Communities(Graph &g) : g(g) {
   // Initialize communities such that each node is in its own community.
   for (int i = 0; i < g.local_vcount; i++) {
     node_to_comm_map[i] = i;
-    total[i] =
-        g.degree(i); // Total degree of the community is the degree of the node.
-    in[i] = 0;       // Initially, no internal edges within the community.
+    total[i] = g.weighted_degree(i); // Total degree of the community is the degree of the node.
+    in[i] = 0;              // Initially, no internal edges within the community.
   }
 }
 
 // Inserts a node into a community and updates relevant metrics.
-void Communities::insert(int node, int community, int node_comm_degree) {
+void Communities::insert(int node, int community, double node_comm_degree) {
   node_to_comm_map[node] = community;
-  total[community] += g.degree(node);
+  total[community] += g.weighted_degree(node);
   in[community] += 2 * node_comm_degree;
 }
 
 // Removes a node from a community, updating the internal community structure
 // and degree information.
-void Communities::remove(int node, int community, int node_comm_degree) {
+void Communities::remove(int node, int community, double node_comm_degree) {
   node_to_comm_map[node] = -1;
-  total[community] -= g.degree(node);
+  total[community] -= g.weighted_degree(node);
   in[community] -= 2 * node_comm_degree;
 }
 
@@ -48,7 +46,7 @@ void Communities::remove(int node, int community, int node_comm_degree) {
 // assignments.
 double Communities::modularity() {
   double q = 0.0;
-  double m2 = static_cast<double>(g.ecount) * 2; // Total weight of all edges in the graph, multiplied by 2.
+  double m2 = static_cast<double>(g.ecount) * 2.0; // Total weight of all edges in the graph, multiplied by 2.
 
   for (int i = 0; i < g.local_vcount; i++) {
     if (total[i] > 0)
@@ -127,7 +125,7 @@ void Communities::compute_neighbors(int node) {
   edges_to_other_comms[node_comm] = 0;
   neighbor_comms.push_back(node_comm);
 
-  for (int neighbor : g.neighbors(node)) {
+  for (auto [neighbor, weight]: g.neighbors(node)) {
     int neighbor_comm = node_to_comm_map[neighbor];
 
     if (node != neighbor) {
@@ -141,7 +139,7 @@ void Communities::compute_neighbors(int node) {
       // Increment the edge weight to the neighboring community.
       // this value is used to store the edges from this node to
       // other nodes in whichever community we decide to join
-      edges_to_other_comms[neighbor_comm] += 1.0;
+      edges_to_other_comms[neighbor_comm] += weight;
     }
   }
 }
@@ -150,7 +148,7 @@ void Communities::compute_neighbors(int node) {
 double Communities::modularity_gain(int node, int comm,
                                     double node_comm_degree) {
   double totc = static_cast<double>(total[comm]);
-  double degc = static_cast<double>(g.degree(node));
+  double degc = static_cast<double>(g.weighted_degree(node));
   double m2 = static_cast<double>(g.ecount) * 2;
   double dnc = static_cast<double>(node_comm_degree);
 
@@ -175,21 +173,27 @@ Graph Communities::into_new_graph() {
   }
 
   // Create new edges based on community connections.
-  std::vector<std::unordered_set<int>> comm_edges(new_comm_number);
-  for (int node = 0; node < node_to_comm_map.size(); node++) {
-    int comm = node_to_comm_map[node];
-    for (auto neighbor : g.neighbors(node))
-      comm_edges[comm].insert(node_to_comm_map[neighbor]);
-  }
+  std::unordered_map<int, std::unordered_map<int, double>> new_graph;
 
-  std::vector<std::pair<int, int>> edge_list;
-  for (int node = 0; node < comm_edges.size(); node++) {
-    for (auto neighbor : comm_edges[node]) {
-      edge_list.push_back(std::make_pair(node, neighbor));
+  for (int vtx = 0; vtx < node_to_comm_map.size(); vtx++) {
+    int comm = node_to_comm_map[vtx];
+
+    for (auto [neighbor, weight]: g.neighbors(vtx)) {
+      int neighbor_comm = node_to_comm_map[neighbor];
+      if(!new_graph[comm].contains(neighbor_comm)) {
+        new_graph[comm][neighbor_comm] = 0.0;
+      }  
+      new_graph[comm][neighbor_comm] += weight;
     }
   }
 
-  return Graph(edge_list); // Return a new graph representing the compressed
+  // Build Adjacency List
+  Graph::AdjacencyList adj_list;
+  for(auto& [vtx, edges]: new_graph) {
+    for(auto& [child, weight]: edges) adj_list[vtx].insert({child, weight});
+  }
+
+  return Graph(adj_list); // Return a new graph representing the compressed
                            // community structure.
 }
 
