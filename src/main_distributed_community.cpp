@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <filesystem>
+#include <gptl.h>
 #include <mpi.h>
 #include "distcommunity.h"
 #include "graph.h"
@@ -41,32 +42,18 @@ int run(int rank, int comm_size, Args args) {
   DistCommunities dist_comm(g);
 
   double init_mod = dist_comm.modularity();
-  dist_comm.iterate();
+
+  dist_comm.one_level();
+
   MPI_Barrier(MPI_COMM_WORLD);
   double new_mod = dist_comm.modularity();
 
-  out.append("level-1");
-  fs::create_directory(out);
-  dist_comm.write_communities_to_file(out);
+  // out.append("level-1");
+  // fs::create_directory(out);
+  // dist_comm.write_communities_to_file(out);
 
   if(rank == 0) 
     std::cout << "Initial Modularity: " << init_mod << " and after one pass: " << new_mod << std::endl;
-
-
-  // if(rank == 0) {
-  //   std::string f("./data/graph/graph.txt");
-  //   Graph g2(f, false);
-  //   // g2.print_graph();
-  //   Communities comm(g2);
-  //   init_mod = comm.modularity();
-  //   comm.iterate();
-  //   new_mod = comm.modularity();
-  //   std::cout << "(No MPI) Initial Modularity: " << init_mod << " and after one pass: " << new_mod << std::endl;
-
-  //   for(int v = 0; v < g2.vcount; v++)
-  //     std::cout << "Vtx " << v << " Community: " << comm.node_to_comm_map[v] << std::endl;
-  // }
-
 
   return 0;
 }
