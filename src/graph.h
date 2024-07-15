@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <iterator>
 #include <map>
+#include <mpi.h>
 #include <set>
 #include <utility>
 #include <vector>
@@ -78,6 +79,10 @@ public:
   Graph(const AdjacencyList &adj_list);
 
   Graph(const std::string &fname, bool distributed);
+  ~Graph();
+
+  void distributedGraphInit(const EdgeList &edge_list, ProcInfo info);
+  void distributedGraphInitWithGlobalVcount(const EdgeList &edge_list, ProcInfo info, int vcount);
 
   // return iterator over neighbors and the edge weight
   NeighborIterator neighbors(const int vert) const;
@@ -99,7 +104,8 @@ public:
   }
 
   // print adj. mat.
-  void print_graph() const;
+  void print() const;
+  void distributed_print() const;
 
   // CSR
   std::vector<unsigned> row_index;
@@ -117,11 +123,14 @@ public:
   // start and end (inclusive) ownership for rows
   std::pair<int, int> rows;
 
+  MPI_Datatype MPI_EDGE;
+
 private:
   // convert adj_list into CSR and return the number of edegs in the list
   int sparsify(const AdjacencyList &adj_list);
   void initializeFromAdjList(const AdjacencyList &adj_list);
-  void distributedGraphInit(const EdgeList &edge_list, ProcInfo info);
+  // Create an MPI_Datatype for Edge struct
+  void create_edge_datatype(MPI_Datatype* dt); 
 };
 
 #endif

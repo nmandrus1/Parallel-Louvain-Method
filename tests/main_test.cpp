@@ -59,7 +59,7 @@ TEST(CommunityDetection, Small) {
   };
 
   Graph g(edges);
-  g.print_graph();
+  g.print();
 
   ASSERT_TRUE(g.ecount == 28);
   
@@ -76,7 +76,7 @@ TEST(CommunityDetection, Small) {
   ASSERT_TRUE(std::abs(c.modularity() - 0.346301) < eps);
 
   Graph g2 = c.into_new_graph();
-  g2.print_graph();
+  g2.print();
 
   ASSERT_EQ(g2.local_vcount, 4);
 }

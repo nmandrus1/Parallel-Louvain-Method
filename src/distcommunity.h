@@ -70,28 +70,32 @@ struct DistCommunities {
 
   DistCommunities(Graph& g);
   ~DistCommunities();
+
+  void init();
   
   double modularity();
-  void insert(int node, int community, int degree, int edges_within_comm, std::unordered_map<int, int>& rank_counts);
-  void remove(int node, int community, int degree, int edges_within_comm, std::unordered_map<int, int>& rank_counts);
+  void insert(int node, int community, double degree, int edges_within_comm, std::unordered_map<int, int>& rank_counts);
+  void remove(int node, int community, double degree, int edges_within_comm, std::unordered_map<int, int>& rank_counts);
   // int compute_best_community(int node, int node_comm);
   int compute_best_community(int node, int node_comm, double temperature);
   void compute_neighbors(int node);
   double modularity_gain(int node, int comm, double node_comm_degree);
   bool iterate();
-
+  bool one_level();
 
   void process_incoming_updates();
   void update_subscribers();
   void update_neighbors(int vtx);
   void send_community_update(int dest, const CommunityUpdate& update);
 
-  // I/O
-  void write_communities_to_file(const std::string& directory);
-  void print_comm_ref_counts();
-  void print_comm_membership();
 
-  Graph into_new_graph();
+  // I/O
+  void write_communities_to_file(const std::string& directory) const;
+  void print_comm_ref_counts() const;
+  void print_comm_membership() const;
+
+  // Reconstruction
+  void into_new_graph();
   
   Graph& g;
 

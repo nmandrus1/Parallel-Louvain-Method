@@ -1,4 +1,5 @@
 #include "distcommunity.h"
+#include "graph.h"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -26,7 +27,14 @@ struct DegreeInfo {
 // Constructor for the DistCommunities class.
 // Initializes internal data structures and sets up initial community
 // assignments where each node is its own community.
-DistCommunities::DistCommunities(Graph &g) : g(g) {
+DistCommunities::DistCommunities(Graph &g) : g(g) { 
+  create_degree_info_datatype(&MPI_DEGREE_INFO);
+  create_community_update_datatype(&MPI_COMMUNITY_UPDATE);
+
+  init();
+}
+
+void DistCommunities::init() {
   // Resize all vectors to accommodate the graph's vertex count.
   gbl_vtx_to_comm_map.reserve(g.local_vcount * 2);
   in.reserve(g.local_vcount * 2);
@@ -34,9 +42,6 @@ DistCommunities::DistCommunities(Graph &g) : g(g) {
   neighbor_comms.resize(g.local_vcount);
   edges_to_other_comms.reserve(g.local_vcount * 2);
   std::unordered_map<int,double> neighbor_degree(g.local_vcount * 2);
-
-  create_degree_info_datatype(&MPI_DEGREE_INFO);
-  create_community_update_datatype(&MPI_COMMUNITY_UPDATE);
 
   // map rank to list of vertices that have an edge in that rank
   std::unordered_map<int, std::unordered_set<int>> msg_map;
@@ -49,9 +54,11 @@ DistCommunities::DistCommunities(Graph &g) : g(g) {
     double weighted_degree = g.weighted_degree(v);
     for (auto [n, weight] : g.neighbors(v)) {
       int owner = g.getRankOfOwner(n);
+
       if (owner != g.info.rank) {
         if(!msg_map[owner].insert(v).second) continue;
 
+          std::cout << "RANK " << g.info.rank << ": Owner of vtx " << n << ": " << owner << " \t local_vcount: " << g.local_vcount  << " global_vcount: " << g.global_vcount << std::endl;
           send_bufs[owner].push_back({v, weighted_degree});
           send_counts[owner]++;
       }
@@ -78,7 +85,7 @@ DistCommunities::DistCommunities(Graph &g) : g(g) {
       total_receive += recv_counts[i];
   }
 
-  // You'll need to concatenate your send_bufs into a single buffer for sending
+  // concatenate send_bufs into a single buffer for sending
   std::vector<DegreeInfo> send_data;
   send_data.reserve(total_send);
   for (const auto& buf : send_bufs) {
@@ -126,7 +133,7 @@ DistCommunities::~DistCommunities() {
 }
 
 // Inserts a node into a community and updates relevant metrics.
-void DistCommunities::insert(int node, int community, int degree,
+void DistCommunities::insert(int node, int community, double degree,
                              int edges_within_comm,
                              std::unordered_map<int, int> &rank_counts) {
   gbl_vtx_to_comm_map[node] = community;
@@ -144,7 +151,7 @@ void DistCommunities::insert(int node, int community, int degree,
 
 // Removes a node from a community, updating the internal community structure
 // and degree information.
-void DistCommunities::remove(int node, int community, int degree,
+void DistCommunities::remove(int node, int community, double degree,
                              int edges_within_comm,
                              std::unordered_map<int, int> &rank_counts) {
   gbl_vtx_to_comm_map[node] = -1;
@@ -173,6 +180,31 @@ double DistCommunities::modularity() {
 
   MPI_Allreduce(&q, &q, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
   return q;
+}
+
+bool DistCommunities::one_level() {
+
+  #ifdef PROFILE_FNS
+  GPTLstart("iterate");
+  #endif
+
+  bool ret = iterate();
+
+  #ifdef PROFILE_FNS
+  GPTLstop("iterate");
+  #endif
+
+  #ifdef PROFILE_FNS
+  GPTLstart("reconstruction");
+  #endif
+
+  into_new_graph();
+
+  #ifdef PROFILE_FNS
+  GPTLstop("reconstruction");
+  #endif
+
+  return ret;
 }
 
 // Executes one pass of the Louvain method algorithm, attempting to improve the
@@ -567,7 +599,7 @@ double DistCommunities::modularity_gain(int node, int comm,
   return (dnc - totc * degc / m2); // Modularity gain formula.
 }
 
-void DistCommunities::print_comm_ref_counts() {
+void DistCommunities::print_comm_ref_counts() const {
 
   // print comm_ref_counts
   for (int i = 0; i < g.info.comm_size; i++) {
@@ -575,7 +607,10 @@ void DistCommunities::print_comm_ref_counts() {
       std::cout << "RANK " << g.info.rank << ": Community Reference Counts\n";
       for (int v = g.rows.first; v < g.rows.second; v++) {
         std::cout << "\tCommunity " << v << "\n";
-        for (auto &[rank, count] : comm_ref_count[v])
+        auto refs = comm_ref_count.find(v);
+        if(refs == comm_ref_count.end()) continue;
+
+        for (auto &[rank, count] : refs->second)
           std::cout << "\t\tConnections to rank " << rank << ": " << count
                     << std::endl;
       }
@@ -585,13 +620,13 @@ void DistCommunities::print_comm_ref_counts() {
   }
 }
 
-void DistCommunities::print_comm_membership() {
+void DistCommunities::print_comm_membership() const {
 
   // print comm_ref_counts
   for (int i = 0; i < g.info.comm_size; i++) {
     if (g.info.rank == i) {
       for (int v = g.rows.first; v < g.rows.second; v++) 
-         std::cout << "RANK " << g.info.rank << ": Vtx " << v << " Community: " << gbl_vtx_to_comm_map[v] << "\n";
+         std::cout << "RANK " << g.info.rank << ": Vtx " << v << " Community: " << gbl_vtx_to_comm_map.find(v)->second << "\n";
       std::cout << std::endl;
     }
 
@@ -599,7 +634,7 @@ void DistCommunities::print_comm_membership() {
   }
 }
 
-void DistCommunities::write_communities_to_file(const std::string& directory) {
+void DistCommunities::write_communities_to_file(const std::string& directory) const {
     // Create a filename based on the rank
     std::ostringstream filename;
     filename << directory << "/" << g.info.rank << ".txt";
@@ -614,7 +649,7 @@ void DistCommunities::write_communities_to_file(const std::string& directory) {
 
     // Write community data: vertex id and its community
     for (int v = g.rows.first; v < g.rows.second; v++) {
-        outfile << v << " " << gbl_vtx_to_comm_map[v] << "\n";
+        outfile << v << " " << gbl_vtx_to_comm_map.find(v)->second << "\n";
     }
 
     outfile.close();
@@ -681,4 +716,142 @@ void create_community_update_datatype(MPI_Datatype* dt) {
   MPI_Type_commit(dt);
 }
 
+// Build a new graph based on community information gathered during iteration
+void DistCommunities::into_new_graph() {
+  // TODO: I think enough information is sent in CommunityUpdates
+  //       to keep track of edges to other communities
+
+  // renumber edges
+  //   - Count local communities = N
+  //   - Send N to process P + 1 so it can start labeling new comms at N + 1
+  // 
+  // gather weights of edges into other comms
+  //   - self loop = in[comm]
+  //   - loop over all vertices and sum edges to other comms
+  //   - send data if your comm owner is remote
+  // 
+  // build new graph from adjacency list
+
+  unsigned long unique_count = comm_ref_count.size(); 
+  std::vector<int> recv_counts(g.info.comm_size);
+
+  // share uniuqe counts and start renumbering communities
+  MPI_Allgather(&unique_count, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+  // the first number to label our unique communities
+  int prefix = 0;
+  for(unsigned i = 0; i < g.info.rank; i++)
+    prefix += recv_counts[i];
+
+  // renumbered
+  std::unordered_map<int, int> old_to_new_comm(unique_count);
+  std::vector<int> comm_update_send_buf;
+
+  Graph::EdgeList self_edges; // vector of self loops for local comms 
+  for(auto& [comm, refs]: comm_ref_count) {   
+    old_to_new_comm[comm] = prefix;
+    comm_update_send_buf.push_back(comm);
+    comm_update_send_buf.push_back(prefix);
+    self_edges.push_back({prefix, prefix, in[comm]});
+
+    prefix += 1;
+  }
+
+  // Alltoallv common vectors
+  std::vector<int> send_counts(g.info.comm_size, 0);
+  std::vector<int> sdispls(g.info.comm_size);
+  std::vector<int> rdispls(g.info.comm_size);
+  
+  unsigned num_communities = 0;
+  for(int rank = 0; rank < g.info.comm_size; rank++) {
+    rdispls[rank] = num_communities * 2; 
+    num_communities += recv_counts[rank];
+    recv_counts[rank] *= 2;
+  }
+
+  old_to_new_comm.reserve(num_communities);
+
+  std::vector<int> comm_update_recv_buf(num_communities * 2);
+  MPI_Allgatherv(comm_update_send_buf.data(), comm_update_send_buf.size(), MPI_INT, comm_update_recv_buf.data(), recv_counts.data(), rdispls.data(), MPI_INT, MPI_COMM_WORLD);
+
+  // loop over the buffer and update ids
+  for(int i = 0; i < comm_update_recv_buf.size(); i+=2) 
+    old_to_new_comm[comm_update_recv_buf[i]] = comm_update_recv_buf[i+1];
+
+  recv_counts.clear();
+  rdispls.clear();
+
+  // loop over every vertex
+  // look for neighbors that arent in its community
+  //    - add the edge weight to the current edge sum
+
+  // Map comm to neighbor comm and the weight between them
+  std::unordered_map<int, std::unordered_map<int, double>> msg_map;
+
+  for(int v = g.rows.first; v < g.rows.second; v++) {
+    int comm = gbl_vtx_to_comm_map[v];
+    for(auto [neighbor, weight]: g.neighbors(v)) {
+      int neighbor_comm = gbl_vtx_to_comm_map[neighbor];
+      if(neighbor_comm == comm) continue;
+      msg_map[comm][neighbor_comm] += weight;
+    }
+  }
+
+  // gather a all the info to send to each rank
+  std::vector<std::vector<Edge>> send_bufs(g.info.comm_size);
+  for(auto& [comm, edges]: msg_map) {
+    int owner = g.getRankOfOwner(comm);
+    for(auto& [neighbor_comm, weight]: edges) {
+      send_bufs[owner].push_back({old_to_new_comm[comm], old_to_new_comm[neighbor_comm], weight});
+      send_counts[owner] += 1;
+    }
+  }
+
+  // prepare for Alltoallv
+  int total_send = 0;
+  for (int i = 0; i < g.info.comm_size; ++i) {
+      sdispls[i] = total_send;
+      total_send += send_counts[i];
+  } 
+
+  // Assuming recv_counts and rdispls are similarly calculated
+  recv_counts.resize(g.info.comm_size);
+  rdispls.resize(g.info.comm_size);
+  MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+  // The total receive size would need to be calculated by all processes collectively, potentially using MPI_Alltoall to share the send_counts
+  // Calculate receive displacements
+  int total_receive = 0; // This will accumulate the total number of items to receive
+  for (int i = 0; i < g.info.comm_size; ++i) {
+      rdispls[i] = total_receive;
+      total_receive += recv_counts[i];
+  }
+
+  Graph::EdgeList send_data;
+  send_data.reserve(total_send);
+  for (const auto& buf : send_bufs) {
+      send_data.insert(send_data.end(), buf.begin(), buf.end());
+  }
+
+  Graph::EdgeList recv_data(total_receive);  // total_receive needs to be calculated
+
+  MPI_Alltoallv(send_data.data(), send_counts.data(), sdispls.data(), g.MPI_EDGE,
+                recv_data.data(), recv_counts.data(), rdispls.data(), g.MPI_EDGE, MPI_COMM_WORLD);
+
+  // combine multi edges into a single edge
+  std::unordered_map<int, std::unordered_map<int, double>> adj;
+  for(auto edge: recv_data) adj[edge.v1][edge.v2] += edge.weight;
+
+  Graph::EdgeList final;
+  for(auto& [v, edge]: adj) {
+    for(auto[neighbor, weight]: edge) 
+      final.push_back({v, neighbor, weight});
+  }
+
+  final.insert(final.end(), self_edges.begin(), self_edges.end());
+
+  // TODO: Checkpoint edgelist here
+
+  g.distributedGraphInitWithGlobalVcount(final, g.info, num_communities);
+}
 

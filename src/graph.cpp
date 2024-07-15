@@ -20,8 +20,6 @@
 #include <utility>
 #include <gptl.h>
 
-// Create an MPI_Datatype for Edge struct
-void create_edge_datatype(MPI_Datatype* dt); 
 
 Graph::EdgeList Graph::edge_list_from_file(const std::string& fname) {
     std::ifstream file(fname);
@@ -99,13 +97,14 @@ Graph::Graph(const std::string &fname, bool distributed) {
   } 
 }
 
+Graph::~Graph() {
+  MPI_Type_free(&MPI_EDGE);
+}
 
 void Graph::distributedGraphInit(const EdgeList& edges, ProcInfo info) {
   // if this is a distributed graph, we need to calculate which edges belong
   // where For now we assume that all edges are numbered 0 to n with no gaps map
   // ranks to the edges that need to go to that rank
-
-  info = info;
 
   int max_vtx = 0;
   for (auto edge : edges)
@@ -116,11 +115,17 @@ void Graph::distributedGraphInit(const EdgeList& edges, ProcInfo info) {
   // the graph
   MPI_Allreduce(&max_vtx, &max_vtx, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
+  distributedGraphInitWithGlobalVcount(edges, info, max_vtx + 1);
+}
+
+void Graph::distributedGraphInitWithGlobalVcount(const EdgeList &edges, ProcInfo info, int vcount) {
+  info = info;
+  
   // we have a vcount x vcount adj matrix locally
   // globally, info.width is the width of the process grid
   // so with 4 mpi procs info.width = 2 and the total number of
   // vertices is (max_vtx + 1) / 2 = 16/2 -> 8
-  global_vcount = max_vtx + 1;
+  global_vcount = vcount;
   local_vcount = global_vcount / info.comm_size;
 
   rows.first = info.rank * local_vcount;
@@ -199,13 +204,12 @@ void Graph::distributedGraphInit(const EdgeList& edges, ProcInfo info) {
   // resize recv buffer
   EdgeList recv_buf(total_edges_to_recv);
 
-  MPI_Datatype edge_type;
-  create_edge_datatype(&edge_type);
+  create_edge_datatype(&MPI_EDGE);
 
   MPI_Request req2;
   MPI_Ialltoallv(send_buf.data(), counts_send.data(), displs_send.data(),
-                 edge_type, recv_buf.data(), recv_counts.data(),
-                 recv_displ.data(), edge_type, MPI_COMM_WORLD, &req2);
+                 MPI_EDGE, recv_buf.data(), recv_counts.data(),
+                 recv_displ.data(), MPI_EDGE, MPI_COMM_WORLD, &req2);
   MPI_Wait(&req2, MPI_STATUS_IGNORE);
 
   AdjacencyList adj_list;
@@ -218,8 +222,6 @@ void Graph::distributedGraphInit(const EdgeList& edges, ProcInfo info) {
   }
 
   sparsify(adj_list);
-
-  MPI_Type_free(&edge_type);
 }
 
 // get the list of vertices vert is connected to
@@ -242,7 +244,7 @@ double Graph::weighted_degree(int vtx) const {
   return sum;
 }
 
-void Graph::print_graph() const {
+void Graph::print() const {
     // Determine the width to use for each number in the matrix, for consistent formatting
     int width = 6; // Adjust this width as needed for better spacing
 
@@ -254,6 +256,7 @@ void Graph::print_graph() const {
         }
 
         // Print out the row with each weight formatted nicely
+        std::cout << vtx << ": ";
         for (int j = 0; j < global_vcount; j++) {
             std::cout << std::setw(width) << std::setprecision(2) << std::fixed << weights_row[j];
             if (j != global_vcount - 1) {
@@ -267,8 +270,18 @@ void Graph::print_graph() const {
     std::cout << std::endl; // Additional newline for separation after the whole matrix
 }
 
+void Graph::distributed_print() const {
+  for(int rank = 0; rank < info.comm_size; rank++) {
+    if(info.rank == rank) {
+      print();
+    }
 
-void create_edge_datatype(MPI_Datatype* dt) {
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+}
+
+
+void Graph::create_edge_datatype(MPI_Datatype* dt) {
     int lengths[3] = { 1, 1, 1 };
  
     // Calculate displacements
