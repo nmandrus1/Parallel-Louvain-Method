@@ -178,7 +178,7 @@ double DistCommunities::modularity() {
                                               // each community's contribution.
   }
 
-  MPI_Allreduce(&q, &q, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, &q, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
   return q;
 }
 
@@ -359,7 +359,7 @@ bool DistCommunities::iterate() {
     if (total_num_moves == prev_num_moves)
       all_finished = true;
 
-    MPI_Allreduce(&all_finished, &all_finished, 1, MPI_C_BOOL, MPI_LAND,
+    MPI_Allreduce(MPI_IN_PLACE, &all_finished, 1, MPI_C_BOOL, MPI_LAND,
                   MPI_COMM_WORLD);
     if (all_finished)
       return improvement; // Return whether there was any improvement in this

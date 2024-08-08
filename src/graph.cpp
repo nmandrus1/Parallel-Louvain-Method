@@ -115,7 +115,7 @@ void Graph::distributedGraphInit(const EdgeList& edges, ProcInfo info) {
   // send and recv the maximum vertex number, this + 1 is the total number of
   // vertices in the graph and we can use this information to help us partition
   // the graph
-  MPI_Allreduce(&max_vtx, &max_vtx, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, &max_vtx, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
   distributedGraphInitWithGlobalVcount(edges, info, max_vtx + 1);
 }
@@ -134,7 +134,7 @@ void Graph::distributedGraphInitWithGlobalVcount(const EdgeList &edges, ProcInfo
   rows.second = rows.first + local_vcount;
 
   int edge_count = edges.size();
-  MPI_Allreduce(&edge_count, &edge_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, &edge_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
   ecount = edge_count;
 
   
