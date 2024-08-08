@@ -95,7 +95,7 @@ struct DistCommunities {
   void print_comm_membership() const;
 
   // Reconstruction
-  void into_new_graph();
+  Graph into_new_graph();
   
   Graph& g;
 

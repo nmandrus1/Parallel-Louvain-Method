@@ -635,28 +635,74 @@ void DistCommunities::print_comm_membership() const {
 }
 
 void DistCommunities::write_communities_to_file(const std::string& directory) const {
-    // Create a filename based on the rank
-    std::ostringstream filename;
-    filename << directory << "/" << g.info.rank << ".txt";
-
-    // Open the output file stream
-    std::ofstream outfile(filename.str());
-
-    if (!outfile.is_open()) {
-        std::cerr << "Failed to open file for writing: " << filename.str() << std::endl;
-        return;
-    }
-
-    // Write community data: vertex id and its community
+    // Prepare data for all communities on this rank
+    std::unordered_map<int, std::vector<int>> local_community_to_vertices;
     for (int v = g.rows.first; v < g.rows.second; v++) {
-        outfile << v << " " << gbl_vtx_to_comm_map.find(v)->second << "\n";
+        int community_id = gbl_vtx_to_comm_map.find(v)->second;
+        local_community_to_vertices[community_id].push_back(v);
+    }
+    // Each rank prepares a send buffer with all its community data
+    std::vector<int> send_data;
+    for (const auto& [community_id, vertices] : local_community_to_vertices) {
+        // Append community_id, the number of vertices, and the vertices themselves
+        send_data.push_back(community_id);
+        send_data.push_back(vertices.size());
+        send_data.insert(send_data.end(), vertices.begin(), vertices.end());
+    }
+    
+    // Gather sizes to determine buffer sizes
+    int local_send_count = send_data.size();
+    std::vector<int> recv_counts(g.info.comm_size);
+    MPI_Allgather(&local_send_count, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+    
+    // Calculate displacements for allgatherv
+    std::vector<int> displacements(g.info.comm_size, 0);
+    std::partial_sum(recv_counts.begin(), recv_counts.end() - 1, displacements.begin() + 1);
+    
+    // Prepare receive buffer
+    int total_recv = std::accumulate(recv_counts.begin(), recv_counts.end(), 0);
+    std::vector<int> recv_data(total_recv);
+    
+    // Perform the allgatherv
+    MPI_Allgatherv(send_data.data(), local_send_count, MPI_INT,
+                   recv_data.data(), recv_counts.data(), displacements.data(), MPI_INT, MPI_COMM_WORLD);
+
+    // Process received data and aggregate communities
+    std::unordered_map<int, std::vector<int>> global_community_to_vertices;
+    int index = 0;
+    while (index < total_recv) {
+        int community_id = recv_data[index++];
+        int num_vertices = recv_data[index++];
+        global_community_to_vertices[community_id].insert(
+            global_community_to_vertices[community_id].end(),
+            recv_data.begin() + index, recv_data.begin() + index + num_vertices
+        );
+        index += num_vertices;
     }
 
-    outfile.close();
+    // Each rank writes out the communities it owns
+    for (const auto& [community_id, vertices] : global_community_to_vertices) {
+        if (g.getRankOfOwner(community_id) == g.info.rank) {
+            std::ostringstream filename;
+            filename << directory << "/community_" << community_id << ".txt";
+            std::ofstream outfile(filename.str());
+            if (!outfile.is_open()) {
+                std::cerr << "Failed to open file for writing: " << filename.str() << std::endl;
+                continue;
+            }
+            outfile << "Community " << community_id << " (" << vertices.size() << " members): {";
+            for (size_t i = 0; i < vertices.size(); ++i) {
+                outfile << vertices[i];
+                if (i < vertices.size() - 1) {
+                    outfile << ", ";
+                }
+            }
+            outfile << "}\n";
+            outfile.close();
+        }
+    }
 
-    // Synchronize after writing to ensure all files are written
     MPI_Barrier(MPI_COMM_WORLD);
-
     if (g.info.rank == 0) {
         std::cout << "All ranks have finished writing community data to " << directory << std::endl;
     }
@@ -717,7 +763,7 @@ void create_community_update_datatype(MPI_Datatype* dt) {
 }
 
 // Build a new graph based on community information gathered during iteration
-void DistCommunities::into_new_graph() {
+Graph DistCommunities::into_new_graph() {
   // TODO: I think enough information is sent in CommunityUpdates
   //       to keep track of edges to other communities
 
@@ -851,7 +897,20 @@ void DistCommunities::into_new_graph() {
   final.insert(final.end(), self_edges.begin(), self_edges.end());
 
   // TODO: Checkpoint edgelist here
+  for(int rank = 0; rank < g.info.comm_size; rank++) {
+    if (g.info.rank == rank) {
+      std::cout << "RANK " << rank << " final edgelist: {";
+      for(auto edge: final) {
+        std::cout << "\t" << edge.v1 << " " << edge.v2 << " " << edge.weight << "\n";
+      };
+      std::cout << "}" << std::endl;
+    }
 
-  g.distributedGraphInitWithGlobalVcount(final, g.info, num_communities);
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+
+  Graph new_g; 
+  new_g.distributedGraphInit(final, g.info);
+  return new_g;
 }
 

@@ -70,6 +70,8 @@ void Graph::initializeFromAdjList(const AdjacencyList& adj_list) {
   ecount = sparsify(adj_list);
 }
 
+Graph::Graph() {}
+
 // default constructor
 Graph::Graph(size_t vcount) : local_vcount(vcount), global_vcount(vcount){}
 
@@ -306,3 +308,56 @@ void Graph::create_edge_datatype(MPI_Datatype* dt) {
   
 }
 
+void Graph::write_edges_to_file(const std::string& directory) const {
+    std::string filename = directory + "/graph.txt";
+
+    // Open an MPI file handle
+    MPI_File file;
+    MPI_Status status;
+    int err = MPI_File_open(MPI_COMM_WORLD, filename.c_str(), MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &file);
+    if (err) {
+        if (info.rank == 0) {
+            std::cerr << "Failed to open file: " << filename << std::endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, err);
+        return;
+    }
+
+    // Prepare a buffer to write
+    std::stringstream ss;
+    for (int v = rows.first; v < rows.second; v++) {
+        auto it = neighbors(v);
+        while (it != it.end()) {
+            auto [neighbor, weight] = *it;
+            if (v <= neighbor) { // Ensure each edge is only written once
+                // ss << "RANK " << info.rank << "   " <<  v << " " << neighbor << " " << std::fixed << std::setprecision(2) << weight << "\n";
+                ss << v << " " << neighbor << " " << std::fixed << std::setprecision(2) << weight << "\n";
+            }
+            ++it;
+        }
+    }
+
+    // Get the string from stringstream
+    std::string data = ss.str();
+    MPI_Offset offset = 0;
+    MPI_Offset local_size = data.size();
+    MPI_Offset total_size = 0;
+
+    // Each process calculates its offset in the file
+    MPI_Exscan(&local_size, &offset, 1, MPI_OFFSET, MPI_SUM, MPI_COMM_WORLD);
+
+    // Rank 0 starts at the beginning of the file
+    if (info.rank == 0) {
+        offset = 0;
+    }
+
+    // Write to the file at the correct offset
+    MPI_File_write_at_all(file, offset, data.c_str(), data.size(), MPI_CHAR, &status);
+
+    // Close the file
+    MPI_File_close(&file);
+
+    if (info.rank == 0) {
+        std::cout << "All ranks have finished writing edges to " << filename << std::endl;
+    }
+}

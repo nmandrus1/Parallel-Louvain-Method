@@ -68,6 +68,10 @@ public:
   // helper function to construct an edgelist from an input file
   static EdgeList edge_list_from_file(const std::string &fname);
 
+  // write the distributed graph to a file
+  void write_edges_to_file(const std::string& directory) const;
+
+  Graph();
   // constructor creates adj. mat. with vcount^2 elements in data vector
   Graph(size_t vcount);
   // creates graph from list of edges and a vcount
