@@ -897,17 +897,17 @@ Graph DistCommunities::into_new_graph() {
   final.insert(final.end(), self_edges.begin(), self_edges.end());
 
   // TODO: Checkpoint edgelist here
-  for(int rank = 0; rank < g.info.comm_size; rank++) {
-    if (g.info.rank == rank) {
-      std::cout << "RANK " << rank << " final edgelist: {";
-      for(auto edge: final) {
-        std::cout << "\t" << edge.v1 << " " << edge.v2 << " " << edge.weight << "\n";
-      };
-      std::cout << "}" << std::endl;
-    }
+  // for(int rank = 0; rank < g.info.comm_size; rank++) {
+  //   if (g.info.rank == rank) {
+  //     std::cout << "RANK " << rank << " final edgelist: {";
+  //     for(auto edge: final) {
+  //       std::cout << "\t" << edge.v1 << " " << edge.v2 << " " << edge.weight << "\n";
+  //     };
+  //     std::cout << "}" << std::endl;
+  //   }
 
-    MPI_Barrier(MPI_COMM_WORLD);
-  }
+    // MPI_Barrier(MPI_COMM_WORLD);
+  // }
 
   Graph new_g; 
   new_g.distributedGraphInit(final, g.info);

@@ -63,7 +63,7 @@ int run(int rank, int comm_size, Args args) {
   }
 
   auto new_g = dist_comm.into_new_graph();
-  new_g.distributed_print();
+  // new_g.distributed_print();
   MPI_Barrier(MPI_COMM_WORLD);
   new_g.write_edges_to_file(outdir);
 
